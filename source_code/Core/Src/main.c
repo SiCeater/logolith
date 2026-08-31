@@ -77,7 +77,8 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-  debug =1;
+  debug_init =1;
+  debug_rc =1;
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -111,12 +112,17 @@ int main(void)
   MX_TIM8_Init();
   MX_UART5_Init();
   MX_USART2_UART_Init();
+  MX_TIM1_Init();
+  MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
+
   // R_LED_On();
   // ESC_Init();
   // ESC_Test();
   // R_LED_Off();
-  ICM42688_Init();
+  // ICM42688_Init();
+  // Remote_Init();
+
   /* USER CODE END 2 */
 
   /* Infinite loop */

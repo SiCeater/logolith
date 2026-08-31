@@ -41,7 +41,7 @@ void ESC_Init()
     R_LED_Off();
 
     // Debug optionnel
-    if (debug)
+    if (debug_init)
     {
         print_to_console("\n\rESCs : initialized and calibrated", 36);
     }

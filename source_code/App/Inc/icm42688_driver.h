@@ -3,8 +3,8 @@
  * SPI1 + DMA2, fast loop 1kHz — GYRO (8KHz) + ACCEL (1KHz)
  *
  * Câblage :
- *   PC2  → ICM42688_SPI_CS   (GPIO Output)
- *   PC3  → ICM42688_INT2     (EXTI3, rising edge)
+ *   PA4  → ICM42688_SPI_CS   (GPIO Output)
+ *   PC4  → ICM42688_INT2     (EXTI4, rising edge)
  *   PA5  → SPI1_SCLK         (AF5)
  *   PA6  → SPI1_MISO         (AF5)
  *   PA7  → SPI1_MOSI         (AF5)
@@ -26,6 +26,7 @@
 #include "stm32f4xx_ll_spi.h"
 #include "stm32f4xx_ll_dma.h"
 #include "stm32f4xx_ll_gpio.h"
+#include "gpio.h"
 #include "debug.h"
 #include <stdint.h>
 #include <stdbool.h>
@@ -324,8 +325,10 @@
  * SPI et GPIO
  * ═══════════════════════════════════════════════════════════════════════════ */
 #define ICM42688_READ_FLAG              0x80U   /* Bit 7 = 1 en lecture SPI */
-#define ICM42688_CS_PORT                GPIOC
-#define ICM42688_CS_PIN                 LL_GPIO_PIN_2
+#define ICM42688_CS_PORT                GPIOA
+#define ICM42688_CS_PIN                 LL_GPIO_PIN_4
+#define ICM42688_INT_PORT               GPIOC
+#define ICM42688_INT_PIN                LL_GPIO_PIN_4
  
 /* DMA */
 #define ICM42688_DMA                    DMA2
@@ -393,7 +396,7 @@ void ICM42688_Init(void);
 /**
  * @brief  Lance une transaction DMA SPI1 non-bloquante (13 octets burst).
  *         Relance le burst RX en réarmant les streams DMA (mode Normal).
- *         Appelé depuis ICM42688_EXTI3_Callback() (INT2 rising edge @ 1 kHz).
+ *         Appelé depuis ICM42688_EXTI4_Callback() (INT2 rising edge @ 1 kHz).
  */
 void ICM42688_Start_DMA_Read(void);
  
@@ -405,10 +408,10 @@ void ICM42688_Start_DMA_Read(void);
 void ICM42688_DMA_RX_Complete_Callback(void);
  
 /**
- * @brief  Callback EXTI3 (flanc montant INT2 de l'ICM-42688-P @ 1kHz).
- *         À appeler depuis EXTI3_IRQHandler dans stm32f4xx_it.c.
+ * @brief  Callback EXTI4 (flanc montant INT2 de l'ICM-42688-P @ 1kHz).
+ *         À appeler depuis EXTI4_IRQHandler dans stm32f4xx_it.c.
  */
-void ICM42688_EXTI3_Callback(void);
+void ICM42688_EXTI4_Callback(void);
  
 /**
  * @brief  Wrapper pour callback DMA2 Stream0 (compatibilité stm32f4xx_it.c).

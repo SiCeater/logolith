@@ -153,7 +153,7 @@ void ICM42688_Init(void)
 {
     uint8_t cfg;
     
-    if (debug)
+    if (debug_init)
         print_to_console("\n\r\n\rICM-42688-P : initialisation...", sizeof("\n\r\n\rICM-42688-P : initialisation..."));
 
     ICM42688_CS_HIGH();
@@ -171,7 +171,7 @@ void ICM42688_Init(void)
      */
     cfg = spi_read_reg(ICM42688_BANK_SEL_0, ICM42688_REG_WHO_AM_I);
     if (cfg != ICM42688_WHO_AM_I_VAL) {
-        if (debug) {
+        if (debug_init) {
             print_to_console("\n\rICM-42688-P : WHO_AM_I FAILED (read: 0x", 
                            sizeof("\n\rICM-42688-P : WHO_AM_I FAILED (read: 0x"));
             /* Debug : afficher valeur lue en hexa */
@@ -184,7 +184,7 @@ void ICM42688_Init(void)
         while(1);  /* Stopper firmware — ICM-42688-P non détecté */
     }
     else {
-        if (debug)
+        if (debug_init)
             print_to_console("\n\rICM-42688-P : WHO_AM_I OK (0x47)", 
                            sizeof("\n\rICM-42688-P : WHO_AM_I OK (0x47)"));
     }
@@ -202,7 +202,7 @@ void ICM42688_Init(void)
                   ICM42688_DEVICE_CONFIG_SOFT_RESET_CONFIG);
     LL_mDelay(5);  /* Marge sécurité : 5 ms */
     
-    if (debug)
+    if (debug_init)
         print_to_console("\n\rICM-42688-P : SOFT_RESET OK", sizeof("\n\rICM-42688-P : SOFT_RESET OK"));
     
     
@@ -226,12 +226,12 @@ void ICM42688_Init(void)
     /* Vérification lecture */
     cfg = spi_read_reg(ICM42688_BANK_SEL_0, ICM42688_REG_PWR_MGMT0);
     if ((cfg & 0x3FU) != (ICM42688_PWR_MGMT0_GYRO_MODE_LN | ICM42688_PWR_MGMT0_ACCEL_MODE_LN | ICM42688_PWR_MGMT0_TEMP_DIS)) {
-        if (debug)
+        if (debug_init)
             print_to_console("\n\rREG_PWR_MGMT0 MISMATCH", sizeof("\n\rREG_PWR_MGMT0 MISMATCH"));
         while(1);
     }
     else {
-        if (debug)
+        if (debug_init)
             print_to_console("\n\rICM-42688-P : REG_PWR_MGMT0 OK (Low-Noise mode)", 
                            sizeof("\n\rICM-42688-P : REG_PWR_MGMT0 OK (Low-Noise mode)"));
     }
@@ -254,12 +254,12 @@ void ICM42688_Init(void)
     
     cfg = spi_read_reg(ICM42688_BANK_SEL_0, ICM42688_REG_GYRO_CONFIG0);
     if (cfg != (ICM42688_GYRO_FS_SEL_2000DPS | ICM42688_GYRO_ODR_8kHz)) {
-        if (debug)
+        if (debug_init)
             print_to_console("\n\rREG_GYRO_CONFIG0 MISMATCH", sizeof("\n\rREG_GYRO_CONFIG0 MISMATCH"));
         while(1);
     }
     else {
-        if (debug)
+        if (debug_init)
             print_to_console("\n\rICM-42688-P : REG_GYRO_CONFIG0 OK (+/-2000dps, 8kHz)", 
                            sizeof("\n\rICM-42688-P : REG_GYRO_CONFIG0 OK (+/-2000dps, 8kHz)"));
     }
@@ -281,12 +281,12 @@ void ICM42688_Init(void)
     
     cfg = spi_read_reg(ICM42688_BANK_SEL_0, ICM42688_REG_ACCEL_CONFIG0);
     if (cfg != (ICM42688_ACCEL_FS_SEL_16G | ICM42688_ACCEL_ODR_1kHz)) {
-        if (debug)
+        if (debug_init)
             print_to_console("\n\rREG_ACCEL_CONFIG0 MISMATCH", sizeof("\n\rREG_ACCEL_CONFIG0 MISMATCH"));
         while(1);
     }
     else {
-        if (debug)
+        if (debug_init)
             print_to_console("\n\rICM-42688-P : REG_ACCEL_CONFIG0 OK (+/-16g, 1kHz)", 
                            sizeof("\n\rICM-42688-P : REG_ACCEL_CONFIG0 OK (+/-16g, 1kHz)"));
     }
@@ -327,13 +327,13 @@ void ICM42688_Init(void)
     /* Vérification lecture (BANK 1) que le premier registre est correct */
     cfg = spi_read_reg(ICM42688_BANK_SEL_1, ICM42688_REG_GYRO_CONFIG_STATIC2_B1);
     if (cfg != 0x3FU) {
-        if (debug)
+        if (debug_init)
             print_to_console("\n\rREG_GYRO_CONFIG_STATIC2 (BANK1) MISMATCH", 
                            sizeof("\n\rREG_GYRO_CONFIG_STATIC2 (BANK1) MISMATCH"));
         while(1);
     }
     else {
-        if (debug)
+        if (debug_init)
             print_to_console("\n\rICM-42688-P : AAF gyro config OK (BANK 1, notch ~200Hz)", 
                            sizeof("\n\rICM-42688-P : AAF gyro config OK (BANK 1, notch ~200Hz)"));
     }
@@ -346,7 +346,7 @@ void ICM42688_Init(void)
     spi_write_reg(ICM42688_BANK_SEL_2, ICM42688_REG_ACCEL_CONFIG_STATIC4_B2, 0x00U);
     LL_mDelay(10);
     
-    if (debug)
+    if (debug_init)
         print_to_console("\n\rICM-42688-P : AAF accel disabled (BANK 2)", 
                        sizeof("\n\rICM-42688-P : AAF accel disabled (BANK 2)"));
     
@@ -372,12 +372,12 @@ void ICM42688_Init(void)
     
     cfg = spi_read_reg(ICM42688_BANK_SEL_0, ICM42688_REG_GYRO_CONFIG1);
     if ((cfg & 0x0CU) != ICM42688_GYRO_UI_FILT_ORD_2ND) {
-        if (debug)
+        if (debug_init)
             print_to_console("\n\rREG_GYRO_CONFIG1 MISMATCH", sizeof("\n\rREG_GYRO_CONFIG1 MISMATCH"));
         while(1);
     }
     else {
-        if (debug)
+        if (debug_init)
             print_to_console("\n\rICM-42688-P : REG_GYRO_CONFIG1 OK (UI filt 2nd order)", 
                            sizeof("\n\rICM-42688-P : REG_GYRO_CONFIG1 OK (UI filt 2nd order)"));
     }
@@ -392,13 +392,13 @@ void ICM42688_Init(void)
     
     cfg = spi_read_reg(ICM42688_BANK_SEL_0, ICM42688_REG_GYRO_ACCEL_CONFIG0);
     if ((cfg & 0x18U) != ICM42688_ACCEL_UI_FILT_ORD_2ND) {
-        if (debug)
+        if (debug_init)
             print_to_console("\n\rREG_GYRO_ACCEL_CONFIG0 MISMATCH", 
                            sizeof("\n\rREG_GYRO_ACCEL_CONFIG0 MISMATCH"));
         while(1);
     }
     else {
-        if (debug)
+        if (debug_init)
             print_to_console("\n\rICM-42688-P : REG_GYRO_ACCEL_CONFIG0 OK (accel UI filt 2nd)", 
                            sizeof("\n\rICM-42688-P : REG_GYRO_ACCEL_CONFIG0 OK (accel UI filt 2nd)"));
     }
@@ -417,12 +417,12 @@ void ICM42688_Init(void)
     
     cfg = spi_read_reg(ICM42688_BANK_SEL_0, ICM42688_REG_ACCEL_CONFIG1);
     if ((cfg & 0x0FU) != ICM42688_ACCEL_UI_FILT_BW_ODR_DIV_20) {
-        if (debug)
+        if (debug_init)
             print_to_console("\n\rREG_ACCEL_CONFIG1 MISMATCH", sizeof("\n\rREG_ACCEL_CONFIG1 MISMATCH"));
         while(1);
     }
     else {
-        if (debug)
+        if (debug_init)
             print_to_console("\n\rICM-42688-P : REG_ACCEL_CONFIG1 OK (UI BW ~50Hz)", 
                            sizeof("\n\rICM-42688-P : REG_ACCEL_CONFIG1 OK (UI BW ~50Hz)"));
     }
@@ -449,12 +449,12 @@ void ICM42688_Init(void)
     if ((cfg & 0x38U) != (ICM42688_INT_CONFIG_INT2_MODE_PULSED | 
                           ICM42688_INT_CONFIG_INT2_DRIVE_PP | 
                           ICM42688_INT_CONFIG_INT2_POLARITY_HIGH)) {
-        if (debug)
+        if (debug_init)
             print_to_console("\n\rREG_INT_CONFIG MISMATCH", sizeof("\n\rREG_INT_CONFIG MISMATCH"));
         while(1);
     }
     else {
-        if (debug)
+        if (debug_init)
             print_to_console("\n\rICM-42688-P : REG_INT_CONFIG OK (INT2 pulsed, PP, high)", 
                            sizeof("\n\rICM-42688-P : REG_INT_CONFIG OK (INT2 pulsed, PP, high)"));
     }
@@ -470,12 +470,12 @@ void ICM42688_Init(void)
     
     cfg = spi_read_reg(ICM42688_BANK_SEL_0, ICM42688_REG_INT_CONFIG1);
     if (!(cfg & ICM42688_INT_CONFIG1_INT_ASYNC_RESET)) {
-        if (debug)
+        if (debug_init)
             print_to_console("\n\rREG_INT_CONFIG1 MISMATCH", sizeof("\n\rREG_INT_CONFIG1 MISMATCH"));
         while(1);
     }
     else {
-        if (debug)
+        if (debug_init)
             print_to_console("\n\rICM-42688-P : REG_INT_CONFIG1 OK (async reset)", 
                            sizeof("\n\rICM-42688-P : REG_INT_CONFIG1 OK (async reset)"));
     }
@@ -493,12 +493,12 @@ void ICM42688_Init(void)
     
     cfg = spi_read_reg(ICM42688_BANK_SEL_0, ICM42688_REG_INT_SOURCE0);
     if (!(cfg & ICM42688_INT_SOURCE0_UI_DRDY_INT2_EN)) {
-        if (debug)
+        if (debug_init)
             print_to_console("\n\rREG_INT_SOURCE0 MISMATCH", sizeof("\n\rREG_INT_SOURCE0 MISMATCH"));
         while(1);
     }
     else {
-        if (debug)
+        if (debug_init)
             print_to_console("\n\rICM-42688-P : REG_INT_SOURCE0 OK (UI_DRDY -> INT2)", 
                            sizeof("\n\rICM-42688-P : REG_INT_SOURCE0 OK (UI_DRDY -> INT2)"));
     }
@@ -523,12 +523,12 @@ void ICM42688_Init(void)
     
     cfg = spi_read_reg(ICM42688_BANK_SEL_0, ICM42688_REG_INTF_CONFIG0);
     if (!(cfg & ICM42688_INTF_CONFIG0_SENSOR_DATA_ENDIAN_BIG)) {
-        if (debug)
+        if (debug_init)
             print_to_console("\n\rREG_INTF_CONFIG0 MISMATCH", sizeof("\n\rREG_INTF_CONFIG0 MISMATCH"));
         while(1);
     }
     else {
-        if (debug)
+        if (debug_init)
             print_to_console("\n\rICM-42688-P : REG_INTF_CONFIG0 OK (big-endian)", 
                            sizeof("\n\rICM-42688-P : REG_INTF_CONFIG0 OK (big-endian)"));
     }
@@ -558,14 +558,14 @@ void ICM42688_Init(void)
     /* Enable Transfer Complete interrupt sur RX stream uniquement */
     LL_DMA_EnableIT_TC(ICM42688_DMA, ICM42688_DMA_RX_STREAM);
     
-    if (debug)
+    if (debug_init)
         print_to_console("\n\rICM-42688-P : DMA buffers prepared (burst 13 bytes)", 
                        sizeof("\n\rICM-42688-P : DMA buffers prepared (burst 13 bytes)"));
     
     /* ══════════════════════════════════════════════════════════════════════
      * ÉTAPE 12 : Initialisation terminée
      * ══════════════════════════════════════════════════════════════════════ */
-    if (debug)
+    if (debug_init)
         print_to_console("\n\rICM-42688-P : Init complete, ready for fast loop @ 1kHz\n\r", 
                        sizeof("\n\rICM-42688-P : Init complete, ready for fast loop @ 1kHz\n\r"));
 
@@ -685,7 +685,7 @@ void ICM42688_DMA_RX_Complete_Callback(void)
 /* ═══════════════════════════════════════════════════════════════════════════
  * CALLBACKS INTERRUPTIONS
  * ═══════════════════════════════════════════════════════════════════════════ */
-void ICM42688_EXTI3_Callback(void)
+void ICM42688_EXTI4_Callback(void)
 {
     /*
      * INT2 rising edge @ 1 kHz (UI_DRDY).
