@@ -56,18 +56,21 @@ void MX_GPIO_Init(void)
   LL_GPIO_ResetOutputPin(BUZZER_GPIO_Port, BUZZER_Pin);
 
   /**/
+  LL_GPIO_SetOutputPin(N_B_LED_GPIO_Port, N_B_LED_Pin);
+
+  /**/
   LL_GPIO_SetOutputPin(ICM42688_SPI1_CS_GPIO_Port, ICM42688_SPI1_CS_Pin);
 
   /**/
-  LL_GPIO_SetOutputPin(GPIOB, N_B_LED_Pin|N_R_LED_Pin);
+  LL_GPIO_SetOutputPin(N_R_LED_GPIO_Port, N_R_LED_Pin);
 
   /**/
-  GPIO_InitStruct.Pin = BUZZER_Pin;
+  GPIO_InitStruct.Pin = BUZZER_Pin|N_B_LED_Pin;
   GPIO_InitStruct.Mode = LL_GPIO_MODE_OUTPUT;
   GPIO_InitStruct.Speed = LL_GPIO_SPEED_FREQ_LOW;
   GPIO_InitStruct.OutputType = LL_GPIO_OUTPUT_PUSHPULL;
   GPIO_InitStruct.Pull = LL_GPIO_PULL_NO;
-  LL_GPIO_Init(BUZZER_GPIO_Port, &GPIO_InitStruct);
+  LL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
   /**/
   GPIO_InitStruct.Pin = ICM42688_SPI1_CS_Pin;
@@ -78,12 +81,12 @@ void MX_GPIO_Init(void)
   LL_GPIO_Init(ICM42688_SPI1_CS_GPIO_Port, &GPIO_InitStruct);
 
   /**/
-  GPIO_InitStruct.Pin = N_B_LED_Pin|N_R_LED_Pin;
+  GPIO_InitStruct.Pin = N_R_LED_Pin;
   GPIO_InitStruct.Mode = LL_GPIO_MODE_OUTPUT;
   GPIO_InitStruct.Speed = LL_GPIO_SPEED_FREQ_LOW;
   GPIO_InitStruct.OutputType = LL_GPIO_OUTPUT_PUSHPULL;
   GPIO_InitStruct.Pull = LL_GPIO_PULL_NO;
-  LL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+  LL_GPIO_Init(N_R_LED_GPIO_Port, &GPIO_InitStruct);
 
   /**/
   LL_SYSCFG_SetEXTISource(LL_SYSCFG_EXTI_PORTC, LL_SYSCFG_EXTI_LINE4);

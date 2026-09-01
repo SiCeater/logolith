@@ -40,10 +40,6 @@ static uint8_t dma_rx_buf[ICM42688_BURST_LEN];
  */
 static void icm42688_select_bank(uint8_t bank)
 {
-    // volatile uint8_t dummy;
-    // dummy = SPI1->DR;
-    // dummy = SPI1->SR;
-    // (void)dummy;
 
     ICM42688_CS_LOW();
 
@@ -75,16 +71,10 @@ static void icm42688_select_bank(uint8_t bank)
  */
 static void spi_write_reg(uint8_t bank, uint8_t reg, uint8_t val)
 {
-    // volatile uint8_t dummy;
 
     icm42688_select_bank(bank);
 
-    // dummy = SPI1->DR;
-    // dummy = SPI1->SR;
-    // (void)dummy;
-
     ICM42688_CS_LOW();
-    
     
     /* Adresse registre (bit7=0 → write) */
     while (!LL_SPI_IsActiveFlag_TXE(SPI1));
@@ -115,13 +105,8 @@ static void spi_write_reg(uint8_t bank, uint8_t reg, uint8_t val)
 static uint8_t spi_read_reg(uint8_t bank, uint8_t reg)
 {
     uint8_t val;
-    // volatile uint8_t dummy;
     
-    // icm42688_select_bank(bank);
-    
-    // dummy = SPI1->DR;
-    // dummy = SPI1->SR;
-    // (void)dummy;
+    icm42688_select_bank(bank);
 
     ICM42688_CS_LOW();
     
@@ -152,15 +137,29 @@ static uint8_t spi_read_reg(uint8_t bank, uint8_t reg)
 void ICM42688_Init(void)
 {
     uint8_t cfg;
+    uint32_t sr = SPI1->SR;
     
     if (debug_init)
         print_to_console("\n\r\n\rICM-42688-P : initialisation...", sizeof("\n\r\n\rICM-42688-P : initialisation..."));
 
-    ICM42688_CS_HIGH();
-    LL_mDelay(1);
     
+    
+    
+    ICM42688_CS_HIGH();   // ou ICM42688_CS_HIGH();
+    LL_mDelay(1);
+
     LL_SPI_Enable(SPI1);
     LL_mDelay(100);
+
+    /* ── ICI, avant tout accès registre ── */
+    sr = SPI1->SR;
+    if (sr & SPI_SR_MODF) {
+        if (debug_init)
+            print_to_console("\n\rSPI1 : MODF detected, clearing...", 
+                       sizeof("\n\rSPI1 : MODF detected, clearing..."));
+        (void)SPI1->SR;
+        LL_SPI_Enable(SPI1);
+    }
     
     /* ══════════════════════════════════════════════════════════════════════
      * ÉTAPE 1 : Vérification WHO_AM_I

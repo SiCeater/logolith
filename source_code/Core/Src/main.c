@@ -120,7 +120,8 @@ int main(void)
   // ESC_Init();
   // ESC_Test();
   // R_LED_Off();
-  // ICM42688_Init();
+  B_LED_On();
+  ICM42688_Init();
   // Remote_Init();
 
   /* USER CODE END 2 */
