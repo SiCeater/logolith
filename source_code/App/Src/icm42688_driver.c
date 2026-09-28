@@ -567,7 +567,7 @@ void ICM42688_Init(void)
 
     /* ── 9. Configurer NVIC pour EXTI4 (INT DATA_RDY) ── */
     NVIC_EnableIRQ(EXTI4_IRQn);
-p^p^pù}
+}
  
 /* ═══════════════════════════════════════════════════════════════════════════
  * LECTURE DMA
