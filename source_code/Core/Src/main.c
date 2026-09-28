@@ -76,7 +76,7 @@ void SystemClock_Config(void);
 int main(void)
 {
 
-  /* USER CODE BEGIN 1 */
+  /* USER CODE BEGIN 1 */ 
   debug_init =1;
   debug_rc =1;
   /* USER CODE END 1 */
@@ -116,12 +116,14 @@ int main(void)
   MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
 
-  // R_LED_On();
+  R_LED_On();
+  B_LED_On();
+  
   // ESC_Init();
   // ESC_Test();
-  // R_LED_Off();
-  B_LED_On();
+  
   ICM42688_Init();
+
   // Remote_Init();
 
   /* USER CODE END 2 */

@@ -95,7 +95,7 @@ void ESC_Set_Global_Values()
     ESC_Set_Values(m1, m2, m3, m4);
 }
 
-void ESC_RR_MS(uint16_t x)
+void ESC_RL_MS(uint16_t x)
 {
     if (x>3000) {
         x=3000;
@@ -106,7 +106,7 @@ void ESC_RR_MS(uint16_t x)
     LL_TIM_OC_SetCompareCH1(TIM8, 3000 + x);
 }
 
-void ESC_RL_MS(uint16_t x)
+void ESC_RR_MS(uint16_t x)
 {
     if (x>3000) {
         x=3000;
@@ -117,7 +117,7 @@ void ESC_RL_MS(uint16_t x)
     LL_TIM_OC_SetCompareCH3(TIM8, 3000 + x);
 }
 
-void ESC_FL_MS(uint16_t x)
+void ESC_FR_MS(uint16_t x)
 {
     if (x>3000) {
         x=3000;
@@ -128,7 +128,7 @@ void ESC_FL_MS(uint16_t x)
     LL_TIM_OC_SetCompareCH4(TIM8, 3000 + x);
 }
 
-void ESC_FR_MS(uint16_t x)
+void ESC_FL_MS(uint16_t x)
 {
     if (x>3000) {
         x=3000;

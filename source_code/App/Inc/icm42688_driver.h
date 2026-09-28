@@ -19,7 +19,7 @@
  *   - ODR ultra flexible (12.5 Hz à 32 kHz)
  *   - Sensibilité gyro meilleure : noise density ~0.004 dps/√Hz vs ~0.005 MPU6000
  */
- 
+
 #ifndef ICM42688_DRIVER_H
 #define ICM42688_DRIVER_H
  
@@ -82,12 +82,12 @@
 #define ICM42688_REG_GYRO_CONFIG0       0x4FU   /* BANK 0 — GYRO_FS_SEL, GYRO_ODR */
 #define ICM42688_REG_ACCEL_CONFIG0      0x50U   /* BANK 0 — ACCEL_FS_SEL, ACCEL_ODR */
 #define ICM42688_REG_GYRO_CONFIG1       0x51U   /* BANK 0 — GYRO_UI_FILT_ORD, GYRO_DEC2_M2_ORD */
-#define ICM42688_REG_GYRO_ACCEL_CONFIG0 0x52U   /* BANK 0 — ACCEL_UI_FILT_ORD, ACCEL_DEC2_M2_ORD */
-#define ICM42688_REG_ACCEL_CONFIG1      0x53U   /* BANK 0 — ACCEL_UI_FILT_BW */
-#define ICM42688_REG_GYRO_CONFIG_STATIC2 0x0BU  /* BANK 1 — AAF_DELT, AAF_DELTSQR, AAF_BITSHIFT */
-#define ICM42688_REG_GYRO_CONFIG_STATIC3 0x0CU  /* BANK 1 — AAF_DELT (suite) */
-#define ICM42688_REG_GYRO_CONFIG_STATIC4 0x0DU  /* BANK 1 — AAF_DELTSQR (suite) */
-#define ICM42688_REG_GYRO_CONFIG_STATIC5 0x0EU  /* BANK 1 — AAF_BITSHIFT (suite) */
+#define ICM42688_REG_GYRO_ACCEL_CONFIG0 0x52U   /* BANK 0 — ACCEL_UI_FILT_BW, GYRO_UI_FILT_BW */
+#define ICM42688_REG_ACCEL_CONFIG1      0x53U   /* BANK 0 — ACCEL_UI_FILT_ORD, ACCEL_DEC2_M2_ORD */
+#define ICM42688_REG_GYRO_CONFIG_STATIC2 0x0BU  /* BANK 1 — AAF_DIS, NF_DIS */
+#define ICM42688_REG_GYRO_CONFIG_STATIC3 0x0CU  /* BANK 1 — AAF_DELT */
+#define ICM42688_REG_GYRO_CONFIG_STATIC4 0x0DU  /* BANK 1 — AAF_DELTSQR (debut) */
+#define ICM42688_REG_GYRO_CONFIG_STATIC5 0x0EU  /* BANK 1 — AAF_BITSHIFT, AAF_DELTSQR (suite) */
  
 #define ICM42688_REG_TMST_CONFIG        0x54U   /* BANK 0 — timestamp config */
 #define ICM42688_REG_APEX_CONFIG0       0x56U   /* BANK 0 — DMP power save */
@@ -245,7 +245,10 @@
 #define ICM42688_GYRO_UI_FILT_ORD_1ST   (0x00U << 2)   /* 1st order */
 #define ICM42688_GYRO_UI_FILT_ORD_2ND   (0x01U << 2)   /* 2nd order */
 #define ICM42688_GYRO_UI_FILT_ORD_3RD   (0x02U << 2)   /* 3rd order */
- 
+
+#define ICM42688_GYRO_UI_FILT_BW_0      (0x00U)   /* post-AAF LPF bandwidth 0 = ODR/2 */
+#define ICM42688_GYRO_UI_FILT_BW_1      (0x01U)   /* post-AAF LPF bandwidth 1 = ODR/4 */
+
 /* GYRO_ACCEL_CONFIG0 — UI Filter Order accel */
 #define ICM42688_ACCEL_UI_FILT_ORD_1ST  (0x00U << 3)
 #define ICM42688_ACCEL_UI_FILT_ORD_2ND  (0x01U << 3)
@@ -254,16 +257,16 @@
 /* ACCEL_CONFIG1 — UI Filter BW (post-AAF LPF bandwidth) */
 /*
  * Pour drone cinelifter 1 kHz : BW ~50-100 Hz (filtre HW, avant notch SW)
- * Empirique : BW=4 → ~53 Hz @ ODR 1kHz (config TDK app note)
+ * Empirique : BW=6 → ~48 Hz @ ODR 1kHz (config TDK app note)
  */
-#define ICM42688_ACCEL_UI_FILT_BW_ODR_DIV_2   0x00U  /* ODR/2 (BW max) */
-#define ICM42688_ACCEL_UI_FILT_BW_ODR_DIV_4   0x01U  /* ODR/4 */
-#define ICM42688_ACCEL_UI_FILT_BW_ODR_DIV_5   0x02U
-#define ICM42688_ACCEL_UI_FILT_BW_ODR_DIV_8   0x03U
-#define ICM42688_ACCEL_UI_FILT_BW_ODR_DIV_10  0x04U  /* ← ~100 Hz @ ODR 1kHz */
-#define ICM42688_ACCEL_UI_FILT_BW_ODR_DIV_16  0x05U
-#define ICM42688_ACCEL_UI_FILT_BW_ODR_DIV_20  0x06U  /* ← ~50 Hz @ ODR 1kHz */
-#define ICM42688_ACCEL_UI_FILT_BW_ODR_DIV_40  0x07U
+#define ICM42688_ACCEL_UI_FILT_BW_ODR_DIV_2   (0x00U << 4)  /* ODR/2 (BW max) */
+#define ICM42688_ACCEL_UI_FILT_BW_ODR_DIV_4   (0x01U << 4)  /* ODR/4 */
+#define ICM42688_ACCEL_UI_FILT_BW_ODR_DIV_5   (0x02U << 4)
+#define ICM42688_ACCEL_UI_FILT_BW_ODR_DIV_8   (0x03U << 4)
+#define ICM42688_ACCEL_UI_FILT_BW_ODR_DIV_10  (0x04U << 4)  /* ← ~100 Hz @ ODR 1kHz */
+#define ICM42688_ACCEL_UI_FILT_BW_ODR_DIV_16  (0x05U << 4)
+#define ICM42688_ACCEL_UI_FILT_BW_ODR_DIV_20  (0x06U << 4)  /* ← ~50 Hz @ ODR 1kHz */
+#define ICM42688_ACCEL_UI_FILT_BW_ODR_DIV_40  (0x07U << 4)
  
 /* INT_CONFIG bits (BANK 0, 0x14) */
 #define ICM42688_INT_CONFIG_INT2_MODE_PULSED    (0x00U << 5)
@@ -368,7 +371,7 @@ typedef struct {
  
     volatile bool data_ready;
 } icm42688_data_t;
- 
+ /*bite*/
 /* Instance globale */
 extern icm42688_data_t icm42688;
  

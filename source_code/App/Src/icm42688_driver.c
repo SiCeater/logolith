@@ -212,7 +212,7 @@ void ICM42688_Init(void)
      * PWR_MGMT0 (BANK 0, 0x4E) :
      * - GYRO_MODE  = 0b11 (Low-Noise)  → meilleur SNR, biais gyro plus stable
      * - ACCEL_MODE = 0b11 (Low-Noise)  → meilleur SNR vs Low-Power
-     * - TEMP_DIS   = 1 (température enabled, utile pour compensation thermique)
+     * - TEMP_DIS   = 1 (température disabled, utile pour compensation thermique mais pa utilisé pour l'instant)
      * - IDLE       = 0 (capteurs actifs)
      * 
      * Justification Low-Noise : drone cinelifter nécessite stabilité maximale.
@@ -294,8 +294,8 @@ void ICM42688_Init(void)
      * ÉTAPE 6 : Configuration AAF (Anti-Aliasing Filter) gyro uniquement — BANK 1
      * ══════════════════════════════════════════════════════════════════════ */
     /*
-     * L'AAF est un filtre notch programmable pour réjection harmoniques moteur.
-     * Registres GYRO_CONFIG_STATIC2/3/4/5 (BANK 1) : AAF_DELT, AAF_DELTSQR, AAF_BITSHIFT.
+     * L'AAF est un filtre anti repliement de spectre (anti-aliasing filter).
+     * Registres GYRO_CONFIG_STATIC2/3/4/5 (BANK 1) : AAF_DIS, NF_DIS, AAF_DELT, AAF_DELTSQR, AAF_BITSHIFT.
      * 
      * Configuration recommandée TDK pour ODR 8kHz, notch ~200Hz (fondamentale moteur) :
      * - AAF_DELT = 63 (0x3F) → DELT[7:0]
@@ -314,18 +314,18 @@ void ICM42688_Init(void)
      * Note : l'AAF est activé automatiquement en mode Low-Noise si ces registres
      * sont non-nuls. Pas de bit enable séparé.
      */
-    spi_write_reg(ICM42688_BANK_SEL_1, ICM42688_REG_GYRO_CONFIG_STATIC2_B1, 0x3FU);  /* DELT[7:0] = 63 */
+    spi_write_reg(ICM42688_BANK_SEL_1, ICM42688_REG_GYRO_CONFIG_STATIC2_B1, 0x00U);  // GYRO_AAF_DIS=0, GYRO_NF_DIS=0 (les deux ENABLED)
     LL_mDelay(10);
-    spi_write_reg(ICM42688_BANK_SEL_1, ICM42688_REG_GYRO_CONFIG_STATIC3_B1, 0x00U);  /* DELT[15:8] = 0 */
+    spi_write_reg(ICM42688_BANK_SEL_1, ICM42688_REG_GYRO_CONFIG_STATIC3_B1, 0x15U);  // GYRO_AAF_DELT = 21
     LL_mDelay(10);
-    spi_write_reg(ICM42688_BANK_SEL_1, ICM42688_REG_GYRO_CONFIG_STATIC4_B1, 0x81U);  /* DELTSQR[7:0] = 0x81 (LSB de 3969) */
+    spi_write_reg(ICM42688_BANK_SEL_1, ICM42688_REG_GYRO_CONFIG_STATIC4_B1, 0xB8U);  // GYRO_AAF_DELTSQR[7:0] = 440 & 0xFF
     LL_mDelay(10);
-    spi_write_reg(ICM42688_BANK_SEL_1, ICM42688_REG_GYRO_CONFIG_STATIC5_B1, 0x8FU);  /* Bits [7:4] = BITSHIFT = 8 → 0x80, bits [3:0] = DELTSQR[11:8] = 0x0F → combiné = 0x8F */
+    spi_write_reg(ICM42688_BANK_SEL_1, ICM42688_REG_GYRO_CONFIG_STATIC5_B1, 0x61U);  // BITSHIFT=6 | DELTSQR[11:8]=1  → BW ≈ 997 Hz
     LL_mDelay(10);
     
     /* Vérification lecture (BANK 1) que le premier registre est correct */
     cfg = spi_read_reg(ICM42688_BANK_SEL_1, ICM42688_REG_GYRO_CONFIG_STATIC2_B1);
-    if (cfg != 0x3FU) {
+    if (cfg != 0x00U) {
         if (debug_init)
             print_to_console("\n\rREG_GYRO_CONFIG_STATIC2 (BANK1) MISMATCH", 
                            sizeof("\n\rREG_GYRO_CONFIG_STATIC2 (BANK1) MISMATCH"));
@@ -333,21 +333,21 @@ void ICM42688_Init(void)
     }
     else {
         if (debug_init)
-            print_to_console("\n\rICM-42688-P : AAF gyro config OK (BANK 1, notch ~200Hz)", 
-                           sizeof("\n\rICM-42688-P : AAF gyro config OK (BANK 1, notch ~200Hz)"));
+            print_to_console("\n\rICM-42688-P : AAF gyro config OK (BANK 1, AAF GYRO enabled)", 
+                           sizeof("\n\rICM-42688-P : AAF gyro config OK (BANK 1, AAF GYRO enabled)"));
     }
 
     /* AAF accel (BANK 2) — DÉSACTIVÉ (tout zéro) car UI filter suffit */
-    spi_write_reg(ICM42688_BANK_SEL_2, ICM42688_REG_ACCEL_CONFIG_STATIC2_B2, 0x00U);
+    spi_write_reg(ICM42688_BANK_SEL_2, ICM42688_REG_ACCEL_CONFIG_STATIC2_B2, 0x02U); // ACCEL_AAF_DIS=0, DELT=1
     LL_mDelay(10);
-    spi_write_reg(ICM42688_BANK_SEL_2, ICM42688_REG_ACCEL_CONFIG_STATIC3_B2, 0x00U);
+    spi_write_reg(ICM42688_BANK_SEL_2, ICM42688_REG_ACCEL_CONFIG_STATIC3_B2, 0x01U); // DELTSQR[7:0] = 1
     LL_mDelay(10);
-    spi_write_reg(ICM42688_BANK_SEL_2, ICM42688_REG_ACCEL_CONFIG_STATIC4_B2, 0x00U);
+    spi_write_reg(ICM42688_BANK_SEL_2, ICM42688_REG_ACCEL_CONFIG_STATIC4_B2, 0xF0U); // BITSHIFT=15 | DELTSQR[11:8]=0 → 42 Hz exact
     LL_mDelay(10);
     
     if (debug_init)
-        print_to_console("\n\rICM-42688-P : AAF accel disabled (BANK 2)", 
-                       sizeof("\n\rICM-42688-P : AAF accel disabled (BANK 2)"));
+        print_to_console("\n\rICM-42688-P : AAF accel enabled (BANK 2)", 
+                       sizeof("\n\rICM-42688-P : AAF accel enabled (BANK 2)"));
     
     /* Retour BANK 0 pour config interruptions */
     icm42688_select_bank(ICM42688_BANK_SEL_0);
@@ -366,7 +366,7 @@ void ICM42688_Init(void)
 
     /* UI filter gyro : 2nd order (post-AAF) */
     cfg = ICM42688_GYRO_UI_FILT_ORD_2ND;
-    spi_write_reg(ICM42688_BANK_SEL_0, ICM42688_REG_GYRO_CONFIG1, cfg);
+    spi_write_reg(ICM42688_BANK_SEL_0, ICM42688_REG_GYRO_CONFIG1, cfg); // GYRO_UI_FILT_ORD = 2nd
     LL_mDelay(10);
     
     cfg = spi_read_reg(ICM42688_BANK_SEL_0, ICM42688_REG_GYRO_CONFIG1);
@@ -383,14 +383,14 @@ void ICM42688_Init(void)
     
     /*
      * GYRO_ACCEL_CONFIG0 (BANK 0, 0x52) :
-     * - ACCEL_UI_FILT_ORD = 2nd order
+     * - ACCEL_UI_FILT_BW=6 (~48Hz) | GYRO_UI_FILT_BW=0 => 0x60
      */
-    cfg = ICM42688_ACCEL_UI_FILT_ORD_2ND;
+    cfg = ICM42688_ACCEL_UI_FILT_BW_ODR_DIV_20 | ICM42688_GYRO_UI_FILT_BW_0;
     spi_write_reg(ICM42688_BANK_SEL_0, ICM42688_REG_GYRO_ACCEL_CONFIG0, cfg);
     LL_mDelay(10);
     
     cfg = spi_read_reg(ICM42688_BANK_SEL_0, ICM42688_REG_GYRO_ACCEL_CONFIG0);
-    if ((cfg & 0x18U) != ICM42688_ACCEL_UI_FILT_ORD_2ND) {
+    if (cfg != (ICM42688_ACCEL_UI_FILT_BW_ODR_DIV_20 | ICM42688_GYRO_UI_FILT_BW_0)) {
         if (debug_init)
             print_to_console("\n\rREG_GYRO_ACCEL_CONFIG0 MISMATCH", 
                            sizeof("\n\rREG_GYRO_ACCEL_CONFIG0 MISMATCH"));
@@ -398,32 +398,29 @@ void ICM42688_Init(void)
     }
     else {
         if (debug_init)
-            print_to_console("\n\rICM-42688-P : REG_GYRO_ACCEL_CONFIG0 OK (accel UI filt 2nd)", 
-                           sizeof("\n\rICM-42688-P : REG_GYRO_ACCEL_CONFIG0 OK (accel UI filt 2nd)"));
+            print_to_console("\n\rICM-42688-P : REG_GYRO_ACCEL_CONFIG0 OK (accel UI filt BW 48Hz, gyro UI filt 0)", 
+                           sizeof("\n\rICM-42688-P : REG_GYRO_ACCEL_CONFIG0 OK (accel UI filt BW 48Hz, gyro UI filt 0)"));
     }
     
     /*
      * ACCEL_CONFIG1 (BANK 0, 0x53) :
-     * - ACCEL_UI_FILT_BW = ODR/20 → ~50 Hz @ ODR 1kHz
-     * 
-     * Choix BW ~50 Hz : filtre hardware avant notch software (250/500 Hz).
-     * Empirique pour cinelifter : BW trop bas (<50 Hz) ajoute latence,
-     * BW trop haut (>200 Hz) laisse passer vibrations moteur.
+     * - ACCEL_UI_FILT_ORD = 2nd order (compromis latence/rejection)
+     * - ACCEL_DEC2_M2_ORD = ignored (AAF enabled)
      */
-    cfg = ICM42688_ACCEL_UI_FILT_BW_ODR_DIV_20;
+    cfg = ICM42688_ACCEL_UI_FILT_ORD_2ND;
     spi_write_reg(ICM42688_BANK_SEL_0, ICM42688_REG_ACCEL_CONFIG1, cfg);
     LL_mDelay(10);
     
     cfg = spi_read_reg(ICM42688_BANK_SEL_0, ICM42688_REG_ACCEL_CONFIG1);
-    if ((cfg & 0x0FU) != ICM42688_ACCEL_UI_FILT_BW_ODR_DIV_20) {
+    if ((cfg & 0x0FU) != ICM42688_ACCEL_UI_FILT_ORD_2ND) {
         if (debug_init)
             print_to_console("\n\rREG_ACCEL_CONFIG1 MISMATCH", sizeof("\n\rREG_ACCEL_CONFIG1 MISMATCH"));
         while(1);
     }
     else {
         if (debug_init)
-            print_to_console("\n\rICM-42688-P : REG_ACCEL_CONFIG1 OK (UI BW ~50Hz)", 
-                           sizeof("\n\rICM-42688-P : REG_ACCEL_CONFIG1 OK (UI BW ~50Hz)"));
+            print_to_console("\n\rICM-42688-P : REG_ACCEL_CONFIG1 OK (UI filt 2nd order)", 
+                           sizeof("\n\rICM-42688-P : REG_ACCEL_CONFIG1 OK (UI filt 2nd order)"));
     }
     
     /* ══════════════════════════════════════════════════════════════════════
@@ -568,9 +565,9 @@ void ICM42688_Init(void)
         print_to_console("\n\rICM-42688-P : Init complete, ready for fast loop @ 1kHz\n\r", 
                        sizeof("\n\rICM-42688-P : Init complete, ready for fast loop @ 1kHz\n\r"));
 
-    /* ── 9. Configurer NVIC pour EXTI3 (INT DATA_RDY) ── */
-    NVIC_EnableIRQ(EXTI3_IRQn);
-}
+    /* ── 9. Configurer NVIC pour EXTI4 (INT DATA_RDY) ── */
+    NVIC_EnableIRQ(EXTI4_IRQn);
+p^p^pù}
  
 /* ═══════════════════════════════════════════════════════════════════════════
  * LECTURE DMA
@@ -592,23 +589,25 @@ void ICM42688_Start_DMA_Read(void)
     /* Désactiver streams */
     LL_DMA_DisableStream(ICM42688_DMA, ICM42688_DMA_TX_STREAM);
     LL_DMA_DisableStream(ICM42688_DMA, ICM42688_DMA_RX_STREAM);
-    
-    /* Recharger NDTR (compteurs) */
-    LL_DMA_SetDataLength(ICM42688_DMA, ICM42688_DMA_TX_STREAM, ICM42688_BURST_LEN);
-    LL_DMA_SetDataLength(ICM42688_DMA, ICM42688_DMA_RX_STREAM, ICM42688_BURST_LEN);
+    while (LL_DMA_IsEnabledStream(ICM42688_DMA, ICM42688_DMA_RX_STREAM));
+    while (LL_DMA_IsEnabledStream(ICM42688_DMA, ICM42688_DMA_TX_STREAM));
     
     /* Clear flags DMA (évite faux TC si flag resté levé) */
     LL_DMA_ClearFlag_TC0(ICM42688_DMA);   /* RX stream = Stream0 */
     LL_DMA_ClearFlag_TC3(ICM42688_DMA);   /* TX stream = Stream3 */
     LL_DMA_ClearFlag_TE0(ICM42688_DMA);
     LL_DMA_ClearFlag_TE3(ICM42688_DMA);
+
+    /* Recharger NDTR (compteurs) */
+    LL_DMA_SetDataLength(ICM42688_DMA, ICM42688_DMA_TX_STREAM, ICM42688_BURST_LEN);
+    LL_DMA_SetDataLength(ICM42688_DMA, ICM42688_DMA_RX_STREAM, ICM42688_BURST_LEN);
     
+   /* CS LOW → démarrer transaction SPI */
+    ICM42688_CS_LOW();
+
     /* Activer streams */
     LL_DMA_EnableStream(ICM42688_DMA, ICM42688_DMA_RX_STREAM);
     LL_DMA_EnableStream(ICM42688_DMA, ICM42688_DMA_TX_STREAM);
-    
-    /* CS LOW → démarrer transaction SPI */
-    ICM42688_CS_LOW();
     
     /* Activer DMA requests SPI (TX puis RX) */
     LL_SPI_EnableDMAReq_TX(SPI1);
@@ -675,6 +674,26 @@ void ICM42688_DMA_RX_Complete_Callback(void)
     icm42688.gy = (float)icm42688.raw_gy * ICM42688_GYRO_SCALE_2000DPS_RAD_S;
     icm42688.gz = (float)icm42688.raw_gz * ICM42688_GYRO_SCALE_2000DPS_RAD_S;
     
+    /* ── Conversions pour affichage debug puis print ── */
+ 
+    int32_t gx = (int32_t)icm42688.raw_gx * 10000 / 9397;
+    int32_t gy = (int32_t)icm42688.raw_gy * 10000 / 9397;
+    int32_t gz = (int32_t)icm42688.raw_gz * 10000 / 9397;
+
+    int16_t ax = (int16_t)((int32_t)icm42688.raw_ax * 981 / 2048);
+    int16_t ay = (int16_t)((int32_t)icm42688.raw_ay * 981 / 2048);
+    int16_t az = (int16_t)((int32_t)icm42688.raw_az * 981 / 2048);
+
+    print_to_console("G:", 2);
+    print_gyro_rads(gx); UART_Debug_Transmit_Char_LL(' ');
+    print_gyro_rads(gy); UART_Debug_Transmit_Char_LL(' ');
+    print_gyro_rads(gz);
+    print_to_console("  A:", 4);
+    print_accel_mps2(ax); UART_Debug_Transmit_Char_LL(' ');
+    print_accel_mps2(ay); UART_Debug_Transmit_Char_LL(' ');
+    print_accel_mps2(az);
+    UART_Debug_Transmit_Char_LL('\n'); UART_Debug_Transmit_Char_LL('\r');
+
     /* ──────────────────────────────────────────────────────────────────────
      * Flag data_ready → la fast loop peut consommer gx/gy/gz
      * ────────────────────────────────────────────────────────────────────── */
