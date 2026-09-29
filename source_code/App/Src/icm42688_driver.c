@@ -314,8 +314,10 @@ void ICM42688_Init(void)
      * Note : l'AAF est activé automatiquement en mode Low-Noise si ces registres
      * sont non-nuls. Pas de bit enable séparé.
      */
-    spi_write_reg(ICM42688_BANK_SEL_1, ICM42688_REG_GYRO_CONFIG_STATIC2_B1, 0x00U);  // GYRO_AAF_DIS=0, GYRO_NF_DIS=0 (les deux ENABLED)
-    LL_mDelay(10);
+
+    // spi_write_reg(ICM42688_BANK_SEL_1, ICM42688_REG_GYRO_CONFIG_STATIC2_B1, 0xA0U);  // GYRO_AAF_DIS=0, GYRO_NF_DIS=0, bits 0 et 1 (les deux ENABLED) ne sert a rien car la valeur de reset est 0xA0 (bits 7 et 5) donc AAF enabled, NF enabled. On peut laisser 0xA0U pour être explicite, mais pas nécessaire.
+    // LL_mDelay(10);
+
     spi_write_reg(ICM42688_BANK_SEL_1, ICM42688_REG_GYRO_CONFIG_STATIC3_B1, 0x15U);  // GYRO_AAF_DELT = 21
     LL_mDelay(10);
     spi_write_reg(ICM42688_BANK_SEL_1, ICM42688_REG_GYRO_CONFIG_STATIC4_B1, 0xB8U);  // GYRO_AAF_DELTSQR[7:0] = 440 & 0xFF
@@ -325,7 +327,7 @@ void ICM42688_Init(void)
     
     /* Vérification lecture (BANK 1) que le premier registre est correct */
     cfg = spi_read_reg(ICM42688_BANK_SEL_1, ICM42688_REG_GYRO_CONFIG_STATIC2_B1);
-    if (cfg != 0x00U) {
+    if (cfg != 0xA0U) {
         if (debug_init)
             print_to_console("\n\rREG_GYRO_CONFIG_STATIC2 (BANK1) MISMATCH", 
                            sizeof("\n\rREG_GYRO_CONFIG_STATIC2 (BANK1) MISMATCH"));
@@ -476,29 +478,6 @@ void ICM42688_Init(void)
                            sizeof("\n\rICM-42688-P : REG_INT_CONFIG1 OK (async reset)"));
     }
     
-    /*
-     * INT_SOURCE0 (BANK 0, 0x65) :
-     * - UI_DRDY_INT2_EN = 1 (router UI Data Ready → INT2 pin)
-     * 
-     * UI_DRDY se déclenche à l'ODR le plus lent (accel = 1KHz) configuré quand nouvelles données
-     * gyro+accel disponibles dans les registres.
-     */
-    cfg = ICM42688_INT_SOURCE0_UI_DRDY_INT2_EN;
-    spi_write_reg(ICM42688_BANK_SEL_0, ICM42688_REG_INT_SOURCE0, cfg);
-    LL_mDelay(10);
-    
-    cfg = spi_read_reg(ICM42688_BANK_SEL_0, ICM42688_REG_INT_SOURCE0);
-    if (!(cfg & ICM42688_INT_SOURCE0_UI_DRDY_INT2_EN)) {
-        if (debug_init)
-            print_to_console("\n\rREG_INT_SOURCE0 MISMATCH", sizeof("\n\rREG_INT_SOURCE0 MISMATCH"));
-        while(1);
-    }
-    else {
-        if (debug_init)
-            print_to_console("\n\rICM-42688-P : REG_INT_SOURCE0 OK (UI_DRDY -> INT2)", 
-                           sizeof("\n\rICM-42688-P : REG_INT_SOURCE0 OK (UI_DRDY -> INT2)"));
-    }
-    
     /* ══════════════════════════════════════════════════════════════════════
      * ÉTAPE 9 : Configuration endianness et FIFO (optionnel)
      * ══════════════════════════════════════════════════════════════════════ */
@@ -559,11 +538,35 @@ void ICM42688_Init(void)
                        sizeof("\n\rICM-42688-P : DMA buffers prepared (burst 13 bytes)"));
     
     /* ══════════════════════════════════════════════════════════════════════
-     * ÉTAPE 12 : Initialisation terminée
+     * ÉTAPE 12 : Initialisation terminée, on active les interruption coté ICM-42688-P, et coté STM32 (NVIC) pour EXTI4 (INT2)
      * ══════════════════════════════════════════════════════════════════════ */
+
+    /*
+     * INT_SOURCE0 (BANK 0, 0x65) :
+     * - UI_DRDY_INT2_EN = 1 (router UI Data Ready → INT2 pin)
+     * 
+     * UI_DRDY se déclenche à l'ODR le plus lent (accel = 1KHz) configuré quand nouvelles données
+     * gyro+accel disponibles dans les registres.
+     */
+    cfg = ICM42688_INT_SOURCE0_UI_DRDY_INT2_EN;
+    spi_write_reg(ICM42688_BANK_SEL_0, ICM42688_REG_INT_SOURCE3, cfg);
+    LL_mDelay(10);
+    
+    cfg = spi_read_reg(ICM42688_BANK_SEL_0, ICM42688_REG_INT_SOURCE3);
+    if (!(cfg & ICM42688_INT_SOURCE0_UI_DRDY_INT2_EN)) {
+        if (debug_init)
+            print_to_console("\n\rREG_INT_SOURCE3 MISMATCH", sizeof("\n\rREG_INT_SOURCE3 MISMATCH"));
+        while(1);
+    }
+    else {
+        if (debug_init)
+            print_to_console("\n\rICM-42688-P : REG_INT_SOURCE3 OK (UI_DRDY -> INT2)", 
+                           sizeof("\n\rICM-42688-P : REG_INT_SOURCE3 OK (UI_DRDY -> INT2)"));
+    }
+
     if (debug_init)
-        print_to_console("\n\rICM-42688-P : Init complete, ready for fast loop @ 1kHz\n\r", 
-                       sizeof("\n\rICM-42688-P : Init complete, ready for fast loop @ 1kHz\n\r"));
+        print_to_console("\n\rICM-42688-P : Init complete, ready for fast loop 1kHz\n\r", 
+                       sizeof("\n\rICM-42688-P : Init complete, ready for fast loop 1kHz\n\r"));
 
     /* ── 9. Configurer NVIC pour EXTI4 (INT DATA_RDY) ── */
     NVIC_EnableIRQ(EXTI4_IRQn);
@@ -675,24 +678,27 @@ void ICM42688_DMA_RX_Complete_Callback(void)
     icm42688.gz = (float)icm42688.raw_gz * ICM42688_GYRO_SCALE_2000DPS_RAD_S;
     
     /* ── Conversions pour affichage debug puis print ── */
- 
-    int32_t gx = (int32_t)icm42688.raw_gx * 10000 / 9397;
-    int32_t gy = (int32_t)icm42688.raw_gy * 10000 / 9397;
-    int32_t gz = (int32_t)icm42688.raw_gz * 10000 / 9397;
+    if (debug_imu)
+    {
+        int32_t gx = (int32_t)icm42688.raw_gx * 10000 / 9397;
+        int32_t gy = (int32_t)icm42688.raw_gy * 10000 / 9397;
+        int32_t gz = (int32_t)icm42688.raw_gz * 10000 / 9397;
 
-    int16_t ax = (int16_t)((int32_t)icm42688.raw_ax * 981 / 2048);
-    int16_t ay = (int16_t)((int32_t)icm42688.raw_ay * 981 / 2048);
-    int16_t az = (int16_t)((int32_t)icm42688.raw_az * 981 / 2048);
+        int16_t ax = (int16_t)((int32_t)icm42688.raw_ax * 981 / 2048);
+        int16_t ay = (int16_t)((int32_t)icm42688.raw_ay * 981 / 2048);
+        int16_t az = (int16_t)((int32_t)icm42688.raw_az * 981 / 2048);
 
-    print_to_console("G:", 2);
-    print_gyro_rads(gx); UART_Debug_Transmit_Char_LL(' ');
-    print_gyro_rads(gy); UART_Debug_Transmit_Char_LL(' ');
-    print_gyro_rads(gz);
-    print_to_console("  A:", 4);
-    print_accel_mps2(ax); UART_Debug_Transmit_Char_LL(' ');
-    print_accel_mps2(ay); UART_Debug_Transmit_Char_LL(' ');
-    print_accel_mps2(az);
-    UART_Debug_Transmit_Char_LL('\n'); UART_Debug_Transmit_Char_LL('\r');
+        print_to_console("G:", 2);
+        print_gyro_rads(gx); UART_Debug_Transmit_Char_LL(' ');
+        print_gyro_rads(gy); UART_Debug_Transmit_Char_LL(' ');
+        print_gyro_rads(gz);
+        print_to_console("  A:", 4);
+        print_accel_mps2(ax); UART_Debug_Transmit_Char_LL(' ');
+        print_accel_mps2(ay); UART_Debug_Transmit_Char_LL(' ');
+        print_accel_mps2(az);
+        UART_Debug_Transmit_Char_LL('\n'); UART_Debug_Transmit_Char_LL('\r');
+    }
+    
 
     /* ──────────────────────────────────────────────────────────────────────
      * Flag data_ready → la fast loop peut consommer gx/gy/gz

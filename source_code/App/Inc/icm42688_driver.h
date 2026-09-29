@@ -289,7 +289,7 @@
  
 /* INT_SOURCE0 bits (BANK 0, 0x65) — UI Data Ready routing */
 #define ICM42688_INT_SOURCE0_UI_DRDY_INT1_EN    (1U << 3)  /* Route UI DRDY → INT1 */
-#define ICM42688_INT_SOURCE0_UI_DRDY_INT2_EN    (1U << 0)  /* Route UI DRDY → INT2 */
+#define ICM42688_INT_SOURCE0_UI_DRDY_INT2_EN    (1U << 3)  /* Route UI DRDY → INT2 */
  
 /* DEVICE_CONFIG bits (BANK 0, 0x11) */
 #define ICM42688_DEVICE_CONFIG_SOFT_RESET_CONFIG (1U << 0)  /* Soft reset */
