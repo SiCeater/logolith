@@ -240,7 +240,41 @@
 #define ICM42688_ACCEL_ODR_6_25Hz       0x0CU   /* Low-power only */
 #define ICM42688_ACCEL_ODR_3_125Hz      0x0DU
 #define ICM42688_ACCEL_ODR_1_5625Hz     0x0EU
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * SELF TEST — GYRO + ACCEL
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+#define ICM42688_ST_ACCEL_POWER     (1U << 6)
+#define ICM42688_ST_EN_AXYZ         (0x07U << 3)       /* EN_AZ|AY|AX_ST */
+#define ICM42688_ST_EN_GXYZ         (0x07U)            /* EN_GZ|GY|GX_ST */
+
+#define ICM42688_ST_NSAMPLES        200U
+#define ICM42688_ST_GYRO_MIN_DPS    60                 /* À VALIDER (mémoire driver InvenSense) */
+#define ICM42688_ST_ACCEL_MIN_MG    50                 /* idem */
+#define ICM42688_ST_ACCEL_MAX_MG    1200               /* idem */
+
+#define ST_PRINT(s)  print_to_console(s, sizeof(s))
  
+/* ═══════════════════════════════════════════════════════════════════════════
+ * GYRO CALIBRATION — OFFSET GYRO (BANK 4, 0x77-0x7F)
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+#define ICM_B4                  4U
+#define ICM_OFFUSER0            0x77U   /* GYRO_X[7:0]                          */
+#define ICM_OFFUSER1            0x78U   /* [7:4] GYRO_Y[11:8] | [3:0] GYRO_X[11:8] */
+#define ICM_OFFUSER2            0x79U   /* GYRO_Y[7:0]                          */
+#define ICM_OFFUSER3            0x7AU   /* GYRO_Z[7:0]                          */
+#define ICM_OFFUSER4            0x7BU   /* [7:4] ACCEL_X[11:8] | [3:0] GYRO_Z[11:8] */
+
+#define CAL_NSAMPLES            500U
+#define CAL_MAX_ATTEMPTS        5U
+#define CAL_SPAN_MAX_LSB        60.0f   /* crête-crête max / axe (~3,7 dps)      */
+#define CAL_HALF_DIFF_MAX       15.0f   /* écart moyenne 1re/2e moitié (~0,9 dps)*/
+#define CAL_BIAS_MAX_LSB        1000.0f /* ~61 dps (registre : ±64 dps)          */
+#define CAL_BIAS_MIN_LSB        8.0f    /* < ~0,5 dps : pas d'offset à écrire    */
+
+
 /* GYRO_CONFIG1 — UI Filter Order (post-AAF LPF) */
 #define ICM42688_GYRO_UI_FILT_ORD_1ST   (0x00U << 2)   /* 1st order */
 #define ICM42688_GYRO_UI_FILT_ORD_2ND   (0x01U << 2)   /* 2nd order */
@@ -396,6 +430,9 @@ extern icm42688_data_t icm42688;
  */
 void ICM42688_Init(void);
  
+bool ICM42688_CalibrateGyro(void); 
+float ICM42688_GetAccelNormRefLsb(void);
+
 /**
  * @brief  Lance une transaction DMA SPI1 non-bloquante (13 octets burst).
  *         Relance le burst RX en réarmant les streams DMA (mode Normal).

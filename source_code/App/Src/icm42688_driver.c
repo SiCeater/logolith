@@ -15,6 +15,8 @@
  * INSTANCE PUBLIQUE et BUFFERS DMA
  * ═══════════════════════════════════════════════════════════════════════════ */
 icm42688_data_t icm42688 = {0};
+
+static volatile bool icm_ready = false;   /* true après init complète, prêt pour fast loop 1 kHz */
  
 /*
  * IMPORTANT : buffers DMA DOIVENT être en SRAM (0x20000000+), PAS en CCM RAM.
@@ -27,6 +29,17 @@ static uint8_t dma_rx_buf[ICM42688_BURST_LEN];
 /* Macros CS */
 #define ICM42688_CS_LOW()   LL_GPIO_ResetOutputPin(ICM42688_CS_PORT, ICM42688_CS_PIN)
 #define ICM42688_CS_HIGH()  LL_GPIO_SetOutputPin(ICM42688_CS_PORT, ICM42688_CS_PIN)
+
+static float accel_norm_ref_lsb = 2048.0f;   /* norme accel au repos (LSB, ±16g) */
+
+float ICM42688_GetAccelNormRefLsb(void) { return accel_norm_ref_lsb; }
+
+static int16_t cal_clamp12(int32_t v)
+{
+    if (v >  2047) return  2047;
+    if (v < -2048) return -2048;
+    return (int16_t)v;
+}
  
 /* ═══════════════════════════════════════════════════════════════════════════
  * FONCTIONS SPI POLLING — Init uniquement (bloquantes)
@@ -130,6 +143,236 @@ static uint8_t spi_read_reg(uint8_t bank, uint8_t reg)
 
     return val;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * SPs SELF TEST ICM-42688-P
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+static void st_print_i32(int32_t v)
+{
+    char buf[12], tmp[11];
+    uint8_t n = 0, t = 0;
+    uint32_t u = (v < 0) ? (uint32_t)(-v) : (uint32_t)v;
+    if (v < 0) buf[n++] = '-';
+    do { tmp[t++] = (char)('0' + (u % 10U)); u /= 10U; } while (u);
+    while (t) buf[n++] = tmp[--t];
+    print_to_console(buf, n);
+}
+
+/* Moyenne de N échantillons bruts (big-endian, burst via spi_read_reg). */
+static void st_average(int32_t g[3], int32_t a[3])
+{
+    int32_t sg[3] = {0, 0, 0}, sa[3] = {0, 0, 0};
+    uint8_t b[12];
+
+    for (uint32_t n = 0; n < ICM42688_ST_NSAMPLES; n++) {
+        for (uint8_t i = 0; i < 12U; i++)
+            b[i] = spi_read_reg(ICM42688_BANK_SEL_0, (uint8_t)(0x1FU + i)); /* ACCEL_DATA_X1.. */
+        for (uint8_t k = 0; k < 3U; k++) {
+            sa[k] += (int16_t)((b[2U*k] << 8) | b[2U*k + 1U]);
+            sg[k] += (int16_t)((b[6U + 2U*k] << 8) | b[7U + 2U*k]);
+        }
+        LL_mDelay(1);   /* ODR 1 kHz */
+    }
+    for (uint8_t k = 0; k < 3U; k++) {
+        g[k] = sg[k] / (int32_t)ICM42688_ST_NSAMPLES;
+        a[k] = sa[k] / (int32_t)ICM42688_ST_NSAMPLES;
+    }
+}
+
+static void ICM42688_SelfTest(void)
+{
+    int32_t g0[3], a0[3], g1[3], a1[3], g2[3], a2[3];
+    uint8_t gyro_ok = 1, accel_ok = 1;
+
+    if (debug_init) ST_PRINT("\n\rICM-42688-P : SELF-TEST (carte immobile)...");
+
+    /* ±250 dps (131 LSB/dps) / ±4 g (8192 LSB/g), ODR 1 kHz */
+    spi_write_reg(ICM42688_BANK_SEL_0, ICM42688_REG_GYRO_CONFIG0,  0x66U); /* FS_SEL=3 | ODR 1k */
+    spi_write_reg(ICM42688_BANK_SEL_0, ICM42688_REG_ACCEL_CONFIG0, 0x46U); /* FS_SEL=2 | ODR 1k */
+    LL_mDelay(100);
+
+    /* 1) Référence sans self-test */
+    st_average(g0, a0);
+
+    /* 2) Self-test gyro 3 axes */
+    spi_write_reg(ICM42688_BANK_SEL_0, ICM42688_REG_SELF_TEST_CONFIG, ICM42688_ST_EN_GXYZ);
+    LL_mDelay(200);
+    st_average(g1, a1);
+
+    /* 3) Self-test accel 3 axes */
+    spi_write_reg(ICM42688_BANK_SEL_0, ICM42688_REG_SELF_TEST_CONFIG,
+                  ICM42688_ST_ACCEL_POWER | ICM42688_ST_EN_AXYZ);
+    LL_mDelay(200);
+    st_average(g2, a2);
+
+    /* Retour à l'état normal (ACCEL_ST_POWER repassé à 0 comme exigé) */
+    spi_write_reg(ICM42688_BANK_SEL_0, ICM42688_REG_SELF_TEST_CONFIG, 0x00U);
+
+    static const char axis[3] = {'X', 'Y', 'Z'};
+    for (uint8_t k = 0; k < 3U; k++) {
+        int32_t dg = g1[k] - g0[k]; if (dg < 0) dg = -dg;
+        int32_t da = a2[k] - a0[k]; if (da < 0) da = -da;
+        int32_t resp_dps  = dg / 131;                /* ±250 dps : 131 LSB/(°/s)  */
+        int32_t resp_mg   = (da * 1000) / 8192;      /* ±4 g     : 8192 LSB/g     */
+        int32_t bias_cdps = (g0[k] * 100) / 131;     /* biais au repos, centi-°/s */
+
+        if (resp_dps < ICM42688_ST_GYRO_MIN_DPS) gyro_ok = 0;
+        if (resp_mg < ICM42688_ST_ACCEL_MIN_MG || resp_mg > ICM42688_ST_ACCEL_MAX_MG) accel_ok = 0;
+
+        if (debug_init) {
+            ST_PRINT("\n\r  ST "); print_to_console((char *)&axis[k], 1);
+            ST_PRINT(" : gyro resp="); st_print_i32(resp_dps);
+            ST_PRINT(" dps | accel resp="); st_print_i32(resp_mg);
+            ST_PRINT(" mg | bias gyro(+/-250)="); st_print_i32(bias_cdps);
+            ST_PRINT(" cdps");
+        }
+    }
+
+    if (debug_init) {
+        if (gyro_ok)  ST_PRINT("\n\rICM-42688-P : SELF-TEST GYRO PASS");
+        else          ST_PRINT("\n\rICM-42688-P : SELF-TEST GYRO FAIL");
+        if (accel_ok) ST_PRINT("\n\rICM-42688-P : SELF-TEST ACCEL PASS");
+        else          ST_PRINT("\n\rICM-42688-P : SELF-TEST ACCEL FAIL");
+    }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * CALIBRATION GYRO ICM-42688-P
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Écrit les offsets gyro (LSB = 1/32 dps, 12 bits signés). Préserve ACCEL_X[11:8]. */
+static void icm42688_set_gyro_offset(int16_t ox, int16_t oy, int16_t oz)
+{
+    uint8_t r4 = spi_read_reg(ICM_B4, ICM_OFFUSER4);
+    spi_write_reg(ICM_B4, ICM_OFFUSER0, (uint8_t)(ox & 0xFF));
+    spi_write_reg(ICM_B4, ICM_OFFUSER1, (uint8_t)((((oy >> 8) & 0x0F) << 4) | ((ox >> 8) & 0x0F)));
+    spi_write_reg(ICM_B4, ICM_OFFUSER2, (uint8_t)(oy & 0xFF));
+    spi_write_reg(ICM_B4, ICM_OFFUSER3, (uint8_t)(oz & 0xFF));
+    spi_write_reg(ICM_B4, ICM_OFFUSER4, (uint8_t)((r4 & 0xF0U) | ((oz >> 8) & 0x0F)));
+}
+
+/* Moyenne gyro/accel sur N échantillons (polling, 1 kHz). Retourne true si immobile. */
+static bool cal_measure(float g[3], float a[3])
+{
+    int32_t sg[3] = {0, 0, 0}, sa[3] = {0, 0, 0}, sg1[3] = {0, 0, 0};
+    int16_t gmin[3] = {32767, 32767, 32767}, gmax[3] = {-32768, -32768, -32768};
+    uint8_t b[12];
+    bool still = true;
+
+    for (uint32_t n = 0; n < CAL_NSAMPLES; n++) {
+        for (uint8_t i = 0; i < 12U; i++)
+            b[i] = spi_read_reg(ICM42688_BANK_SEL_0, (uint8_t)(0x1FU + i));
+        for (uint8_t k = 0; k < 3U; k++) {
+            int16_t av = (int16_t)((b[2U*k] << 8) | b[2U*k + 1U]);
+            int16_t gv = (int16_t)((b[6U + 2U*k] << 8) | b[7U + 2U*k]);
+            sa[k] += av;
+            sg[k] += gv;
+            if (n < CAL_NSAMPLES / 2U) sg1[k] += gv;
+            if (gv < gmin[k]) gmin[k] = gv;
+            if (gv > gmax[k]) gmax[k] = gv;
+        }
+        LL_mDelay(1);
+    }
+    for (uint8_t k = 0; k < 3U; k++) {
+        float h1 = (float)sg1[k] / (float)(CAL_NSAMPLES / 2U);
+        float h2 = (float)(sg[k] - sg1[k]) / (float)(CAL_NSAMPLES - CAL_NSAMPLES / 2U);
+        g[k] = (float)sg[k] / (float)CAL_NSAMPLES;
+        a[k] = (float)sa[k] / (float)CAL_NSAMPLES;
+        if ((float)(gmax[k] - gmin[k]) > CAL_SPAN_MAX_LSB) still = false;
+        if (fabsf(h1 - h2) > CAL_HALF_DIFF_MAX)            still = false;
+    }
+    return still;
+}
+
+bool ICM42688_CalibrateGyro(void)
+{
+    float g[3], a[3], r[3], bsum = 0.0f;
+    int16_t off[3];
+    bool still = false;
+    int8_t sign = 0;
+
+    if (debug_init) ST_PRINT("\n\rICM-42688-P : CALIBRATION GYRO (carte immobile)...");
+    LL_mDelay(100);   /* établissement AAF / filtres UI */
+
+    for (uint8_t t = 0; t < CAL_MAX_ATTEMPTS && !still; t++) {
+        still = cal_measure(g, a);
+        if (!still) {
+            if (debug_init) ST_PRINT("\n\r  mouvement detecte, nouvel essai");
+            LL_mDelay(200);
+        }
+    }
+    if (!still) {
+        if (debug_init) ST_PRINT("\n\rICM-42688-P : CALIBRATION GYRO FAIL (carte pas immobile)");
+        return false;
+    }
+
+    /* Norme accel de référence (invariante à l'inclinaison) → gate Mahony */
+    accel_norm_ref_lsb = sqrtf(a[0]*a[0] + a[1]*a[1] + a[2]*a[2]);
+
+    for (uint8_t k = 0; k < 3U; k++) {
+        if (fabsf(g[k]) > CAL_BIAS_MAX_LSB) {
+            if (debug_init) ST_PRINT("\n\rICM-42688-P : CALIBRATION GYRO FAIL (biais hors plage +/-64 dps)");
+            return false;
+        }
+        bsum += fabsf(g[k]);
+        /* 1 LSB offset = 1/32 dps = 16,4/32 LSB gyro */
+        off[k] = cal_clamp12(lroundf(g[k] * (32.0f / 16.4f)));
+    }
+
+    if (debug_init) {
+        ST_PRINT("\n\r  biais (LSB) X="); st_print_i32((int32_t)g[0]);
+        ST_PRINT(" Y=");                 st_print_i32((int32_t)g[1]);
+        ST_PRINT(" Z=");                 st_print_i32((int32_t)g[2]);
+        ST_PRINT("\n\r  |a| ref (mg) = "); st_print_i32((int32_t)(accel_norm_ref_lsb * 1000.0f / 2048.0f));
+    }
+
+    if (bsum < CAL_BIAS_MIN_LSB) {
+        if (debug_init) ST_PRINT("\n\rICM-42688-P : CALIBRATION GYRO OK (biais deja < 0,5 dps, aucun offset)");
+        return true;
+    }
+
+    /* Convention de signe non documentée : on teste +off puis -off */
+    for (int8_t s = 1; s >= -1 && sign == 0; s -= 2) {
+        icm42688_set_gyro_offset((int16_t)(s * off[0]), (int16_t)(s * off[1]), (int16_t)(s * off[2]));
+        LL_mDelay(100);
+        (void)cal_measure(r, a);
+        if ((fabsf(r[0]) + fabsf(r[1]) + fabsf(r[2])) < 0.25f * bsum) sign = s;
+    }
+    if (sign == 0) {
+        icm42688_set_gyro_offset(0, 0, 0);
+        if (debug_init) ST_PRINT("\n\rICM-42688-P : CALIBRATION GYRO FAIL (offset sans effet)");
+        return false;
+    }
+
+     /* 2e passe : rattrape le résiduel mesuré (sortie = brut + offset, sign = -1 chez toi) */
+    int16_t v[3];
+    for (uint8_t k = 0; k < 3U; k++) {
+        v[k] = cal_clamp12((int32_t)(sign * off[k]) +
+                           lroundf((float)sign * r[k] * (32.0f / 16.4f)));
+    }
+    icm42688_set_gyro_offset(v[0], v[1], v[2]);
+    LL_mDelay(100);
+    (void)cal_measure(r, a);
+
+    /* Vérification lecture des registres */
+    if (spi_read_reg(ICM_B4, ICM_OFFUSER0) != (uint8_t)(v[0] & 0xFF) ||
+        spi_read_reg(ICM_B4, ICM_OFFUSER2) != (uint8_t)(v[1] & 0xFF) ||
+        spi_read_reg(ICM_B4, ICM_OFFUSER3) != (uint8_t)(v[2] & 0xFF)) {
+        if (debug_init) ST_PRINT("\n\rREG_OFFSET_USER (BANK4) MISMATCH");
+    }
+
+    if (debug_init) {
+        ST_PRINT("\n\r  OFFSET_USER final (1/32 dps) X="); st_print_i32(v[0]);
+        ST_PRINT(" Y="); st_print_i32(v[1]);
+        ST_PRINT(" Z="); st_print_i32(v[2]);
+        ST_PRINT("\n\r  residuel final (LSB) X="); st_print_i32((int32_t)r[0]);
+        ST_PRINT(" Y="); st_print_i32((int32_t)r[1]);
+        ST_PRINT(" Z="); st_print_i32((int32_t)r[2]);
+        ST_PRINT("\n\rICM-42688-P : CALIBRATION GYRO OK");
+    }
+    return true;
+}
  
 /* ═══════════════════════════════════════════════════════════════════════════
  * INITIALISATION ICM-42688-P
@@ -138,12 +381,12 @@ void ICM42688_Init(void)
 {
     uint8_t cfg;
     uint32_t sr = SPI1->SR;
+
+    NVIC_DisableIRQ(EXTI4_IRQn); 
+    NVIC_DisableIRQ(DMA2_Stream0_IRQn); // ils ont surrement été activés par CubeMX, mais on ne veut pas d'interruptions pendant l'init du capteur (DMA2_Stream0 = SPI1_RX)
     
     if (debug_init)
         print_to_console("\n\r\n\rICM-42688-P : initialisation...", sizeof("\n\r\n\rICM-42688-P : initialisation..."));
-
-    
-    
     
     ICM42688_CS_HIGH();   // ou ICM42688_CS_HIGH();
     LL_mDelay(1);
@@ -234,6 +477,8 @@ void ICM42688_Init(void)
             print_to_console("\n\rICM-42688-P : REG_PWR_MGMT0 OK (Low-Noise mode)", 
                            sizeof("\n\rICM-42688-P : REG_PWR_MGMT0 OK (Low-Noise mode)"));
     }
+
+    ICM42688_SelfTest();
     
     /* ══════════════════════════════════════════════════════════════════════
      * ÉTAPE 4 : Configuration GYRO_CONFIG0 — ±2000 dps, ODR 8 kHz
@@ -315,7 +560,7 @@ void ICM42688_Init(void)
      * sont non-nuls. Pas de bit enable séparé.
      */
 
-    // spi_write_reg(ICM42688_BANK_SEL_1, ICM42688_REG_GYRO_CONFIG_STATIC2_B1, 0xA0U);  // GYRO_AAF_DIS=0, GYRO_NF_DIS=0, bits 0 et 1 (les deux ENABLED) ne sert a rien car la valeur de reset est 0xA0 (bits 7 et 5) donc AAF enabled, NF enabled. On peut laisser 0xA0U pour être explicite, mais pas nécessaire.
+    // spi_write_reg(ICM42688_BANK_SEL_1, ICM42688_REG_GYRO_CONFIG_STATIC2_B1, 0xA0U);  // GYRO_AAF_DIS=0, GYRO_NF_DIS=0, bits 0 et 1 (les deux ENABLED), valeur de reset = 0xA0 (bits 7 et 5) donc AAF enabled, NF enabled at reset.
     // LL_mDelay(10);
 
     spi_write_reg(ICM42688_BANK_SEL_1, ICM42688_REG_GYRO_CONFIG_STATIC3_B1, 0x15U);  // GYRO_AAF_DELT = 21
@@ -507,6 +752,11 @@ void ICM42688_Init(void)
             print_to_console("\n\rICM-42688-P : REG_INTF_CONFIG0 OK (big-endian)", 
                            sizeof("\n\rICM-42688-P : REG_INTF_CONFIG0 OK (big-endian)"));
     }
+
+    /* ══════════════════════════════════════════════════════════════════════
+     * ÉTAPE 9b : Calibration biais gyro (OFFSET_USER, Bank 4) + |a| de référence
+     * ══════════════════════════════════════════════════════════════════════ */
+    (void)ICM42688_CalibrateGyro();   /* non bloquant : en cas d'échec, biais non compensé */
     
     /* ══════════════════════════════════════════════════════════════════════
      * ÉTAPE 10 : Préparation buffers DMA (burst read 13 octets)
@@ -530,6 +780,12 @@ void ICM42688_Init(void)
     LL_DMA_SetPeriphAddress(ICM42688_DMA, ICM42688_DMA_RX_STREAM, (uint32_t)&SPI1->DR);
     LL_DMA_SetDataLength(ICM42688_DMA, ICM42688_DMA_RX_STREAM, ICM42688_BURST_LEN);
     
+    /* Clear flags DMA */
+    LL_DMA_ClearFlag_TC0(ICM42688_DMA);   /* RX stream = Stream0 */
+    LL_DMA_ClearFlag_TC3(ICM42688_DMA);   /* TX stream = Stream3 */
+    LL_DMA_ClearFlag_TE0(ICM42688_DMA);
+    LL_DMA_ClearFlag_TE3(ICM42688_DMA);
+
     /* Enable Transfer Complete interrupt sur RX stream uniquement */
     LL_DMA_EnableIT_TC(ICM42688_DMA, ICM42688_DMA_RX_STREAM);
     
@@ -568,8 +824,15 @@ void ICM42688_Init(void)
         print_to_console("\n\rICM-42688-P : Init complete, ready for fast loop 1kHz\n\r", 
                        sizeof("\n\rICM-42688-P : Init complete, ready for fast loop 1kHz\n\r"));
 
+
+    LL_EXTI_ClearFlag_0_31(LL_EXTI_LINE_4);
+    NVIC_ClearPendingIRQ(EXTI4_IRQn);
+    NVIC_EnableIRQ(DMA2_Stream0_IRQn);
+
     /* ── 9. Configurer NVIC pour EXTI4 (INT DATA_RDY) ── */
     NVIC_EnableIRQ(EXTI4_IRQn);
+
+    icm_ready = true;
 }
  
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -711,6 +974,7 @@ void ICM42688_DMA_RX_Complete_Callback(void)
  * ═══════════════════════════════════════════════════════════════════════════ */
 void ICM42688_EXTI4_Callback(void)
 {
+    if (!icm_ready) return;
     /*
      * INT2 rising edge @ 1 kHz (UI_DRDY).
      * Déclenche immédiatement la lecture DMA.
