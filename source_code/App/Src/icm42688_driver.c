@@ -4,7 +4,7 @@
  * Gyro and accel, fast loop 1kHz, Low-Noise mode, AAF enabled
  * 
  * Architecture multi-banques (BANK 0/1/2/4) — accès via REG_BANK_SEL
- * Config optimisée pour drone cinelifter F330/F380 (stabilité prioritaire)
+ * Config optimisée pour drone cinelifter F380 (stabilité prioritaire)
  */
  
 #include "icm42688_driver.h"
@@ -950,7 +950,7 @@ void ICM42688_DMA_RX_Complete_Callback(void)
         int16_t ax = (int16_t)((int32_t)icm42688.raw_ax * 981 / 2048);
         int16_t ay = (int16_t)((int32_t)icm42688.raw_ay * 981 / 2048);
         int16_t az = (int16_t)((int32_t)icm42688.raw_az * 981 / 2048);
-
+        
         print_to_console("G:", 2);
         print_gyro_rads(gx); UART_Debug_Transmit_Char_LL(' ');
         print_gyro_rads(gy); UART_Debug_Transmit_Char_LL(' ');
