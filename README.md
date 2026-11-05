@@ -18,12 +18,134 @@ versions figées dans [cmake/dependencies.cmake](cmake/dependencies.cmake).
 Autre carte : créer `boards/<carte>/` (même interface que `board.h`, son `memory.ld`), configurer avec
 `-DLOGOLITH_BOARD=<carte>`.
 
-## Prérequis
+## Démarrer
 
-- Arm GNU Toolchain (`arm-none-eabi-gcc` 12+), dans le `PATH` ou via `ARM_GCC_PATH` (dossier `bin/`)
-- CMake 3.25+, Ninja
-- Python 3 : `pip install -r tools/requirements.txt`
-- STM32CubeProgrammer (première installation, SWD)
+Première fois, dans l'ordre.
+
+1. Installer :
+   - Arm GNU Toolchain (`arm-none-eabi-gcc` 12+), dans le `PATH` ou via `ARM_GCC_PATH` (dossier `bin/`)
+   - CMake 3.25+, Ninja
+   - Python 3
+   - STM32CubeProgrammer (première installation, SWD)
+2. Récupérer le code :
+   ```bash
+   git clone https://github.com/SiCeater/logolith.git
+   cd logolith
+   git switch dev-robin
+   pip install -r tools/requirements.txt
+   ```
+3. Compiler. Le premier configure télécharge les dépendances (internet requis, environ 1 min) :
+   ```bash
+   cmake --workflow --preset debug
+   ```
+4. Installer bootloader et application : brancher la carte en maintenant BOOT, relâcher, puis
+   ```bash
+   cmake --build --preset debug --target flash
+   ```
+   LED bleue à 1 Hz : tout est en place.
+5. Éditeur : VS Code avec l'extension clangd. `.clangd` pointe vers `build/debug/compile_commands.json`. Ajouter
+   dans les réglages VS Code `"clangd.arguments": ["--query-driver=**/arm-none-eabi-gcc*"]` pour que clangd trouve
+   les en-têtes de la toolchain.
+
+## Développer
+
+### Boucle de travail
+
+```bash
+cmake --build --preset debug --target flash
+```
+
+Compile ce qui a changé puis flashe sans bouton, environ 5 s. Carte muette après un plantage : BOOT au branchement,
+même commande.
+
+La CI GitHub compile debug et release à chaque push. Elle doit rester verte.
+
+### Où mettre le code
+
+| Besoin | Emplacement |
+| --- | --- |
+| Accès matériel : broches, SPI, UART, timers, DMA | `boards/lithcore/`, exposé par une fonction `board_*` dans `board.h` |
+| Driver d'un composant (ICM-42688, LPS22HH, ESC) | `drivers/<composant>/`, bibliothèque CMake à créer avec le premier driver, utilise `board.h` |
+| Tâches, logique de vol | `app/src/<module>.c` et `app/include/<module>.h` |
+| Configuration FreeRTOS, TinyUSB | `app/config/` |
+| Dépendance externe | `cmake/dependencies.cmake`, tag figé, jamais copiée dans le dépôt |
+
+### Ajouter une tâche
+
+Modèle : [app/src/heartbeat.c](app/src/heartbeat.c).
+
+1. `app/include/imu.h` :
+   ```c
+   #pragma once
+
+   void imu_start(void);
+   ```
+2. `app/src/imu.c` :
+   ```c
+   #include "imu.h"
+
+   #include "FreeRTOS.h"
+   #include "task.h"
+
+   #define IMU_PERIOD_MS 1
+   #define IMU_STACK     (configMINIMAL_STACK_SIZE * 2)
+   #define IMU_PRIORITY  (tskIDLE_PRIORITY + 5)
+
+   static StackType_t stack[IMU_STACK];
+   static StaticTask_t tcb;
+
+   static void imu_task(void *arg)
+   {
+       (void)arg;
+       TickType_t wake = xTaskGetTickCount();
+
+       for (;;) {
+           // lecture et traitement
+           xTaskDelayUntil(&wake, pdMS_TO_TICKS(IMU_PERIOD_MS));
+       }
+   }
+
+   void imu_start(void)
+   {
+       xTaskCreateStatic(imu_task, "imu", IMU_STACK, NULL, IMU_PRIORITY, stack, &tcb);
+   }
+   ```
+3. Ajouter `src/imu.c` à `add_executable` dans [app/CMakeLists.txt](app/CMakeLists.txt).
+4. Appeler `imu_start()` dans [app/src/main.c](app/src/main.c), avant `vTaskStartScheduler()`.
+
+Priorités (0 à 7, la plus haute gagne) :
+
+| Priorité | Usage |
+| --- | --- |
+| 6 | boucle de contrôle |
+| 5 | capteurs |
+| 4 | radio (RC) |
+| 3 | télémétrie, OSD |
+| 2 | USB |
+| 1 | heartbeat, tâches de fond |
+
+### Règles de codage
+
+- C17, pas de C++.
+- Format : `clang-format -i <fichier>` avant chaque commit ([.clang-format](.clang-format) : 4 espaces, 110 colonnes).
+- Nommage en `snake_case`, préfixé par le module : `imu_start`, `board_led_set`. Macros et constantes en
+  `MAJUSCULES`, types en `_t`.
+- Tout ce qui n'est pas dans le header est `static`. Un header par module, `#pragma once`, le strict nécessaire.
+- Types à taille fixe (`uint32_t`, `int16_t`) pour registres, trames et mesures.
+- Pas d'allocation dynamique : ni `malloc`, ni `xTaskCreate`. Tâches, queues, mutex en version `...Static`.
+- Registres et broches uniquement dans `boards/`. L'application passe par `board.h`.
+- Interruptions courtes, sans attente. FreeRTOS seulement via les fonctions `...FromISR`, et seulement depuis une
+  interruption de priorité NVIC 5 à 15. Priorités 0 à 4 : jamais d'appel FreeRTOS.
+- Données partagées entre tâches : queue, notification ou mutex. Pas de variable globale modifiée par plusieurs tâches.
+- Tâche périodique : `xTaskDelayUntil`, jamais de boucle d'attente.
+- Zéro warning (`-Wall -Wextra -Wshadow -Wconversion`).
+- Commentaires en français, sur le pourquoi. Valeur tirée d'une datasheet : citer le document et la section.
+
+### Git
+
+- Une branche par sujet, partie de `dev-robin`, fusionnée par PR.
+- Commits petits, chacun compile. Titre court qui décrit le changement, corps qui explique pourquoi.
+- Bootloader modifié : le réinstaller avec BOOT, il ne se met pas à jour lui-même.
 
 ## Compiler
 
