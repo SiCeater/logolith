@@ -1,7 +1,6 @@
 # logolith
 
-Firmware du contrôleur de vol d'Aerolith, cinelifter maison pour hybride plein format (classe A7S III).
-Cible : LithCore (STM32F405RGT6). FreeRTOS, écrit de zéro.
+Firmware du contrôleur de vol d'Aerolith.
 
 ## Arborescence
 
