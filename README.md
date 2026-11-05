@@ -1,48 +1,30 @@
 # logolith
 
-Firmware de contrôleur de vol d'Aerolith, un cinelifter maison qui porte un hybride plein format (classe A7S III).
-Écrit de zéro, sur FreeRTOS, pour la LithCore (STM32F405RGT6), en restant portable vers d'autres cartes.
-
-> Branche `dev-robin` : base minimale. Un bootloader USB maison, et une application FreeRTOS dont une tâche fait
-> clignoter la LED bleue et une autre gère le port série USB.
+Firmware du contrôleur de vol d'Aerolith, cinelifter maison pour hybride plein format (classe A7S III).
+Cible : LithCore (STM32F405RGT6). FreeRTOS, écrit de zéro.
 
 ## Arborescence
 
 ```
-app/                  Application : main, tâches, et sa configuration (config/ : FreeRTOS, TinyUSB).
-bootloader/           Bootloader USB DFU : lance l'application ou en reçoit une nouvelle.
-boards/lithcore/      Tout ce qui est propre à la carte : brochage, horloges, plan mémoire, options du MCU.
-cmake/                Toolchain, dépendances, fonctions de build (bin/hex, flash).
-tools/                Scripts côté PC (flash USB).
-.github/workflows/    CI : compile debug et release à chaque push.
+app/              application FreeRTOS et sa config (FreeRTOS, TinyUSB)
+bootloader/       bootloader USB DFU
+boards/lithcore/  brochage, horloges, plan mémoire, options du MCU
+cmake/            toolchain, dépendances, cibles de flash
+tools/            scripts PC
 ```
 
-Seul `boards/` touche aux registres de la carte. Les dépendances (FreeRTOS-Kernel, TinyUSB, CMSIS 6, CMSIS du
-STM32F4) ne sont pas copiées dans le dépôt : CMake les télécharge au premier configure, sur un tag figé dans
-[cmake/dependencies.cmake](cmake/dependencies.cmake).
+Seul `boards/` accède aux registres. Dépendances (FreeRTOS-Kernel, TinyUSB, CMSIS) téléchargées au configure,
+versions figées dans [cmake/dependencies.cmake](cmake/dependencies.cmake).
 
-Pour porter sur une autre carte : créer `boards/<carte>/` avec la même interface que `board.h` et son propre
-`memory.ld`, puis configurer avec `-DLOGOLITH_BOARD=<carte>`.
-
-## Plan mémoire
-
-| Zone | Adresse | Taille | Contenu |
-| --- | --- | --- | --- |
-| Secteurs 0-1 | `0x08000000` | 32 Ko | Bootloader |
-| Secteurs 2-3 | `0x08008000` | 32 Ko | Réservé aux réglages (pas encore utilisé) |
-| Secteurs 4-11 | `0x08010000` | 960 Ko | Application |
-| Fin de RAM | `0x2001FFF0` | 16 o | Demande de passage en DFU, survit au reset |
-
-Défini une seule fois, dans [boards/lithcore/memory.ld](boards/lithcore/memory.ld).
+Autre carte : créer `boards/<carte>/` (même interface que `board.h`, son `memory.ld`), configurer avec
+`-DLOGOLITH_BOARD=<carte>`.
 
 ## Prérequis
 
-- [Arm GNU Toolchain](https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads) (`arm-none-eabi-gcc` 12 ou plus),
-  dans le `PATH` ou indiquée par la variable d'environnement `ARM_GCC_PATH` (dossier `bin/`).
-- CMake 3.25 ou plus, et Ninja.
-- Python 3 avec `pip install -r tools/requirements.txt` (pyserial, pyusb, libusb-package).
-- [STM32CubeProgrammer](https://www.st.com/en/development-tools/stm32cubeprog.html), seulement pour la première
-  installation et le flash par SWD.
+- Arm GNU Toolchain (`arm-none-eabi-gcc` 12+), dans le `PATH` ou via `ARM_GCC_PATH` (dossier `bin/`)
+- CMake 3.25+, Ninja
+- Python 3 : `pip install -r tools/requirements.txt`
+- STM32CubeProgrammer (première installation, SWD)
 
 ## Compiler
 
@@ -50,7 +32,7 @@ Défini une seule fois, dans [boards/lithcore/memory.ld](boards/lithcore/memory.
 cmake --workflow --preset debug     # ou release
 ```
 
-Sortie : `build/debug/app/logolith.{elf,bin,hex,map}` et `build/debug/bootloader/bootloader.{elf,bin,hex,map}`.
+Sorties dans `build/debug/app/` et `build/debug/bootloader/`.
 
 ## Flasher
 
@@ -58,41 +40,48 @@ Sortie : `build/debug/app/logolith.{elf,bin,hex,map}` et `build/debug/bootloader
 cmake --build --preset debug --target flash
 ```
 
-[tools/flash.py](tools/flash.py) choisit le chemin selon ce qui est branché :
+[tools/flash.py](tools/flash.py) détecte l'état de la carte :
 
-1. **Application en marche** (port série « LithCore », `0483:5740`) : le script ouvre le port à 1200 bauds puis coupe
-   DTR, comme pour les cartes Arduino et RP2040. L'application se débranche, écrit une demande en fin de RAM et
-   redémarre. Le bootloader la lit et reste en DFU au lieu de lancer l'application.
-2. **Bootloader en DFU** (« LithCore bootloader », `1209:0001`) : le script envoie `logolith.bin` par DFU 1.1, le
-   bootloader l'écrit puis redémarre sur la nouvelle application. Compter 4 s en tout.
-3. **Bootloader ROM de ST** (bouton BOOT maintenu au branchement) : le script installe bootloader et application avec
-   STM32CubeProgrammer. C'est la première installation, et le recours si le bootloader lui-même est cassé.
+| Carte vue comme | Action |
+| --- | --- |
+| Port série « LithCore » (`0483:5740`) | ouverture à 1200 bauds, l'application redémarre dans le bootloader, puis flash |
+| « LithCore bootloader » (`1209:0001`) | envoi de l'application en DFU 1.1 (environ 4 s) |
+| « STM32 BOOTLOADER » (bouton BOOT maintenu au branchement) | installation bootloader + application via STM32CubeProgrammer |
 
-Sous Windows, le bootloader annonce des descripteurs Microsoft OS 2.0 : WinUSB se charge tout seul, sans Zadig. La
-toute première connexion sur un PC prend une quinzaine de secondes, le temps de cette installation.
+Première installation et bootloader cassé : bouton BOOT. Ensuite plus besoin.
 
-Le bootloader garde la table des vecteurs de l'application (premier bloc) en RAM et ne l'écrit qu'à la fin du
-transfert. Un flash interrompu laisse donc une application invalide : le bootloader reste en DFU, et il suffit de
-relancer la commande.
+Windows charge WinUSB tout seul pour le bootloader. Première connexion sur un PC : environ 15 s.
 
-Par SWD avec une sonde ST-Link (bootloader + application) :
+Flash interrompu : le bootloader reste en DFU, relancer la commande.
+
+SWD avec un ST-Link (bootloader + application) :
 
 ```bash
 cmake --build --preset debug --target flash-swd
 ```
 
-Le PID `1209:0001` est le PID de test de [pid.codes](https://pid.codes) : à remplacer par un PID attribué avant de
-diffuser la carte.
+`1209:0001` est le PID de test de [pid.codes](https://pid.codes), à remplacer avant diffusion.
 
-## LED d'état
+## Plan mémoire
+
+| Zone | Adresse | Taille | Contenu |
+| --- | --- | --- | --- |
+| Secteurs 0-1 | `0x08000000` | 32 Ko | bootloader |
+| Secteurs 2-3 | `0x08008000` | 32 Ko | réservé aux réglages |
+| Secteurs 4-11 | `0x08010000` | 960 Ko | application |
+| Fin de RAM | `0x2001FFF0` | 16 o | demande de passage en DFU, conservée au reset |
+
+Source : [boards/lithcore/memory.ld](boards/lithcore/memory.ld).
+
+## LED
 
 | LED | Signification |
 | --- | --- |
-| Bleue qui clignote (1 Hz) | Application : l'ordonnanceur tourne |
-| Rouge fixe, bleue éteinte | Application : erreur fatale du noyau (assert ou dépassement de pile) |
-| Rouge fixe, bleue qui clignote | Application : le quartz 8 MHz n'a pas démarré, la carte tourne sur l'oscillateur interne |
-| Rouge qui clignote vite | Bootloader en mode DFU, prêt à recevoir une application |
-| Bleue très rapide, rouge éteinte | Bootloader planté (HardFault) |
+| Bleue 1 Hz | application en marche |
+| Rouge fixe, bleue éteinte | erreur fatale du noyau (assert, dépassement de pile) |
+| Rouge fixe, bleue 1 Hz | quartz 8 MHz absent, horloge interne |
+| Rouge rapide | bootloader en DFU |
+| Bleue très rapide | bootloader planté |
 
 ## Licence
 
