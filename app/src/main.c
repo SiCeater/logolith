@@ -2,6 +2,7 @@
 #include "board.h"
 #include "heartbeat.h"
 #include "task.h"
+#include "usb.h"
 
 int main(void)
 {
@@ -11,6 +12,7 @@ int main(void)
     board_led_set(BOARD_LED_RED, board_hse_failed());
 
     heartbeat_start();
+    usb_start();
     vTaskStartScheduler();
 
     // Atteint seulement si le noyau n'a pas pu démarrer.

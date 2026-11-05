@@ -1,16 +1,10 @@
-/* STM32F405RGTx : 1 Mo de flash, 128 Ko de SRAM, 64 Ko de CCM (sans DMA). */
+/* Sections communes au bootloader et à l'application. L'image appelante définit la région FLASH
+   (REGION_ALIAS) après avoir inclus memory.ld. */
 
 ENTRY(Reset_Handler)
 
 _Min_Heap_Size  = 0x0;   /* pas de malloc : FreeRTOS a son propre tas */
 _Min_Stack_Size = 0x800; /* pile du main et des interruptions */
-
-MEMORY
-{
-    FLASH (rx)  : ORIGIN = 0x08000000, LENGTH = 1024K
-    RAM   (xrw) : ORIGIN = 0x20000000, LENGTH = 128K
-    CCMRAM (rw) : ORIGIN = 0x10000000, LENGTH = 64K
-}
 
 _estack = ORIGIN(RAM) + LENGTH(RAM);
 
@@ -91,6 +85,14 @@ SECTIONS
         . = ALIGN(4);
         _ebss = .;
         __bss_end__ = _ebss;
+    } > RAM
+
+    /* Ni initialisé ni remis à zéro au démarrage : survit à un reset logiciel. */
+    .noinit (NOLOAD) :
+    {
+        . = ALIGN(4);
+        *(.noinit*)
+        . = ALIGN(4);
     } > RAM
 
     /* Données rapides non initialisées (pas accessibles par le DMA). */

@@ -1,0 +1,3 @@
+INCLUDE memory.ld
+REGION_ALIAS("FLASH", BOOTLOADER);
+INCLUDE sections.ld

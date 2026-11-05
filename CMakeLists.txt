@@ -20,4 +20,7 @@ include(cmake/dependencies.cmake)
 include(cmake/firmware.cmake)
 
 add_subdirectory(boards/${LOGOLITH_BOARD})
+add_subdirectory(bootloader)
 add_subdirectory(app)
+
+logolith_flash_targets(APP logolith BOOTLOADER bootloader)

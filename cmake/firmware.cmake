@@ -1,6 +1,10 @@
-# logolith_firmware(<cible>) : génère .bin/.hex, affiche la taille et ajoute les cibles de flash.
-#   cmake --build --preset debug --target flash-dfu   (USB, carte en mode DFU)
-#   cmake --build --preset debug --target flash-swd   (sonde ST-Link)
+# logolith_firmware(<cible>) : génère .bin et .hex à côté de l'ELF et affiche la taille.
+#
+# logolith_flash_targets(APP <cible> BOOTLOADER <cible>) : cibles de flash.
+#   cmake --build --preset debug --target flash       application par USB, sans bouton (tools/flash.py)
+#   cmake --build --preset debug --target flash-swd   bootloader + application, sonde ST-Link
+
+find_package(Python3 COMPONENTS Interpreter)
 
 find_program(STM32_PROGRAMMER_CLI STM32_Programmer_CLI
     PATHS
@@ -18,19 +22,38 @@ function(logolith_firmware target)
         COMMAND ${CMAKE_SIZE} $<TARGET_FILE:${target}>
         VERBATIM
     )
+endfunction()
 
-    if(STM32_PROGRAMMER_CLI)
-        add_custom_target(flash-dfu
-            COMMAND ${STM32_PROGRAMMER_CLI} -c port=USB1 -w $<TARGET_FILE:${target}> -v -s 0x08000000
-            DEPENDS ${target}
+function(logolith_flash_targets)
+    cmake_parse_arguments(ARG "" "APP;BOOTLOADER" "" ${ARGN})
+    set(app_elf $<TARGET_FILE:${ARG_APP}>)
+    set(app_bin $<TARGET_FILE_DIR:${ARG_APP}>/${ARG_APP}.bin)
+    set(boot_elf $<TARGET_FILE:${ARG_BOOTLOADER}>)
+
+    if(Python3_FOUND)
+        set(cli_arg "")
+        if(STM32_PROGRAMMER_CLI)
+            set(cli_arg --cli ${STM32_PROGRAMMER_CLI})
+        endif()
+        add_custom_target(flash
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/flash.py
+                    --app-bin ${app_bin} --app-elf ${app_elf} --bootloader-elf ${boot_elf} ${cli_arg}
+            DEPENDS ${ARG_APP} ${ARG_BOOTLOADER}
             USES_TERMINAL
-        )
-        add_custom_target(flash-swd
-            COMMAND ${STM32_PROGRAMMER_CLI} -c port=SWD mode=UR -w $<TARGET_FILE:${target}> -v -rst
-            DEPENDS ${target}
-            USES_TERMINAL
+            VERBATIM
         )
     else()
-        message(STATUS "STM32_Programmer_CLI introuvable : cibles flash-dfu et flash-swd désactivées")
+        message(STATUS "Python 3 introuvable : cible flash désactivée")
+    endif()
+
+    if(STM32_PROGRAMMER_CLI)
+        add_custom_target(flash-swd
+            COMMAND ${STM32_PROGRAMMER_CLI} -c port=SWD mode=UR -w ${boot_elf} -v -w ${app_elf} -v -rst
+            DEPENDS ${ARG_APP} ${ARG_BOOTLOADER}
+            USES_TERMINAL
+            VERBATIM
+        )
+    else()
+        message(STATUS "STM32_Programmer_CLI introuvable : cible flash-swd désactivée")
     endif()
 endfunction()
