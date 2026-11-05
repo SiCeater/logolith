@@ -1,0 +1,30 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  firmware:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        preset: [debug, release]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: carlosperate/arm-none-eabi-gcc-action@v1
+        with:
+          release: '13.3.Rel1'
+
+      - run: sudo apt-get install -y ninja-build
+
+      - run: cmake --workflow --preset ${{ matrix.preset }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: logolith-${{ matrix.preset }}
+          path: |
+            build/${{ matrix.preset }}/app/logolith.elf
+            build/${{ matrix.preset }}/app/logolith.bin
+            build/${{ matrix.preset }}/app/logolith.hex
