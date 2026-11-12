@@ -28,6 +28,9 @@ figées dans [cmake/dependencies.cmake](cmake/dependencies.cmake). Accès au mat
 | [xPack OpenOCD](https://xpack-dev-tools.github.io/openocd-xpack/) | serveur de debug pour la sonde ST-Link |
 | VS Code | extensions proposées à l'ouverture du dossier (CMake Tools, clangd, Cortex-Debug) |
 
+Outils hors du `PATH` : les indiquer dans les réglages utilisateur de VS Code (`cortex-debug.openocdPath`,
+`cortex-debug.armToolchainPath`, et `ARM_GCC_PATH` dans `cmake.environment` et `terminal.integrated.env.windows`).
+
 ## Démarrer
 
 ```bash
