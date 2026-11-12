@@ -49,8 +49,8 @@ Like the rest of Aerolith — frame, ESCs and flight controller — Same philoso
 | Motors | 3115, 640 KV |
 | Propellers | carbon 9050 tri-blade |
 | Battery | 4S LiPo (bench / development), 6S (final) |
-| ESC | Generic 4in1 50A 30.5x30.5mm ESC (bench / development), individual Custom Aerolith ESC |
-| Onboard cam system | RunCam Phoenix 2 SP V3 with AT7456ELAH OSD and RUSHFPV RUSH Tank III Ultimate, DJI O4 Air Unit mounting holes provided on the chassis (planned for future F7 based custom FC with additional UARTs) |
+| ESC | Generic 4in1 50A 30.5x30.5mm ESC (bench / development), individual Custom 60A Aerolith ESC (final) |
+| Onboard cam system | RunCam Phoenix 2 SP V3 with AT7456ELAH OSD and RUSHFPV RUSH Tank III Ultimate 30.5x30.5mm, DJI O4 Air Unit mounting holes provided on the chassis (planned for future F7 based custom FC with additional UARTs) |
 | Payload | Mirrorless camera, A7S III class |
 
 ### LithCore flight controller
@@ -250,7 +250,7 @@ cmake --build --preset Debug
 ### Flash
 
 - **SWD:** ST-Link on the SWD header, flash and debug from VS Code.
-- **USB DFU:** hold BOOT0 while plugging in USB-C, then flash with STM32CubeProgrammer App or use the script "flash_DFU.sh" made by me (with love) directly in your terminal (you will need STM32CubeProgrammer CLI installed), for example:
+- **USB DFU:** hold BOOT0 while plugging in USB-C, then flash with STM32CubeProgrammer App or use the script "flash_DFU.sh" made by me (with love) directly in your terminal (you will need STM32CubeProgrammer CLI installed), with this command:
 
 ```sh
 ./flash_DFU.sh

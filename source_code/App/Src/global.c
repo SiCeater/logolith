@@ -7,9 +7,9 @@
  * Les prints sont BLOQUANTS (attente UART). debug_imu imprime depuis l'ISR DMA de
  * l'ICM (décimé ~10 Hz) ; debug_rc depuis la boucle principale (5 Hz). À n'activer
  * que sur le banc. */
-bool debug_init = false;
-bool debug_rc   = false;
-bool debug_imu  = false;
+bool debug_init = true;
+bool debug_rc   = true;
+bool debug_imu  = true;
 bool debug_warn = true;
 
 /* Non utilisés pour l'instant (cf. global.h) */
