@@ -3,21 +3,26 @@
 
 include(FetchContent)
 
+# Versions figées, aussi affichées par la bannière du configure.
+set(LOGOLITH_CMSIS_CORE_TAG v6.1.0)
+set(LOGOLITH_CMSIS_F4_TAG v2.6.10)
+set(LOGOLITH_FREERTOS_TAG V11.1.0)
+
 FetchContent_Declare(cmsis_core
     GIT_REPOSITORY https://github.com/ARM-software/CMSIS_6.git
-    GIT_TAG        v6.1.0
+    GIT_TAG        ${LOGOLITH_CMSIS_CORE_TAG}
     GIT_SHALLOW    TRUE
 )
 
 FetchContent_Declare(cmsis_device_f4
     GIT_REPOSITORY https://github.com/STMicroelectronics/cmsis-device-f4.git
-    GIT_TAG        v2.6.10
+    GIT_TAG        ${LOGOLITH_CMSIS_F4_TAG}
     GIT_SHALLOW    TRUE
 )
 
 FetchContent_Declare(freertos_kernel
     GIT_REPOSITORY https://github.com/FreeRTOS/FreeRTOS-Kernel.git
-    GIT_TAG        V11.1.0
+    GIT_TAG        ${LOGOLITH_FREERTOS_TAG}
     GIT_SHALLOW    TRUE
 )
 

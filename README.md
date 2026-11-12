@@ -58,6 +58,9 @@ Points d'arrêt, registres des périphériques (fichier SVD) et liste des tâche
 
 Sorties dans `build/debug/` : `logolith.elf` (debug), `.bin`, `.hex`, `.map` (place occupée par chaque fonction).
 
+Affichage : bannière au configure, rapport en fin de build (étapes, mémoire, durée). `NO_COLOR=1` retire les couleurs,
+`LOGOLITH_ASCII=1` dessine en ASCII pur. Hors des tâches VS Code, un terminal Windows doit être en UTF-8 (`chcp 65001`).
+
 ## LED
 
 | LED | Signification |

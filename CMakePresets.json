@@ -1,6 +1,10 @@
 {
   "version": 6,
-  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
   "configurePresets": [
     {
       "name": "base",
@@ -17,32 +21,60 @@
       "name": "debug",
       "displayName": "Debug (-Og, symboles)",
       "inherits": "base",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
     },
     {
       "name": "release",
       "displayName": "Release (-O2, symboles)",
       "inherits": "base",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo" }
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+      }
     }
   ],
   "buildPresets": [
-    { "name": "debug", "configurePreset": "debug" },
-    { "name": "release", "configurePreset": "release" }
+    {
+      "name": "debug",
+      "configurePreset": "debug",
+      "environment": {
+        "NINJA_STATUS": "[%p %f/%t %es] "
+      }
+    },
+    {
+      "name": "release",
+      "configurePreset": "release",
+      "environment": {
+        "NINJA_STATUS": "[%p %f/%t %es] "
+      }
+    }
   ],
   "workflowPresets": [
     {
       "name": "debug",
       "steps": [
-        { "type": "configure", "name": "debug" },
-        { "type": "build", "name": "debug" }
+        {
+          "type": "configure",
+          "name": "debug"
+        },
+        {
+          "type": "build",
+          "name": "debug"
+        }
       ]
     },
     {
       "name": "release",
       "steps": [
-        { "type": "configure", "name": "release" },
-        { "type": "build", "name": "release" }
+        {
+          "type": "configure",
+          "name": "release"
+        },
+        {
+          "type": "build",
+          "name": "release"
+        }
       ]
     }
   ]

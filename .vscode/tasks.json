@@ -5,27 +5,50 @@
       "label": "Compiler (debug)",
       "type": "shell",
       "command": "cmake --workflow --preset debug",
-      "group": { "kind": "build", "isDefault": true },
-      "problemMatcher": ["$gcc"]
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": [
+        "$gcc"
+      ],
+      "windows": {
+        "command": "chcp 65001 > $null; cmake --workflow --preset debug"
+      }
     },
     {
       "label": "Compiler (release)",
       "type": "shell",
       "command": "cmake --workflow --preset release",
       "group": "build",
-      "problemMatcher": ["$gcc"]
+      "problemMatcher": [
+        "$gcc"
+      ],
+      "windows": {
+        "command": "chcp 65001 > $null; cmake --workflow --preset release"
+      }
     },
     {
       "label": "Flasher par USB (DFU)",
       "type": "shell",
       "command": "cmake --build --preset debug --target flash",
-      "problemMatcher": ["$gcc"]
+      "problemMatcher": [
+        "$gcc"
+      ],
+      "windows": {
+        "command": "chcp 65001 > $null; cmake --build --preset debug --target flash"
+      }
     },
     {
       "label": "Flasher par SWD (ST-Link)",
       "type": "shell",
       "command": "cmake --build --preset debug --target flash-swd",
-      "problemMatcher": ["$gcc"]
+      "problemMatcher": [
+        "$gcc"
+      ],
+      "windows": {
+        "command": "chcp 65001 > $null; cmake --build --preset debug --target flash-swd"
+      }
     }
   ]
 }
