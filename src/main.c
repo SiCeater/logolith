@@ -1,11 +1,14 @@
 #include "FreeRTOS.h"
 #include "clock.h"
-#include "stm32f4xx.h"
+#include "stm32f4xx_ll_bus.h"
+#include "stm32f4xx_ll_gpio.h"
 #include "task.h"
 
 // LED d'état de la LithCore, anodes au 3V3 : allumées quand la broche est à 0.
-#define LED_BLUE_PIN 0U // PC0
-#define LED_RED_PIN  9U // PB9
+#define LED_BLUE_PORT GPIOC
+#define LED_BLUE_PIN  LL_GPIO_PIN_0
+#define LED_RED_PORT  GPIOB
+#define LED_RED_PIN   LL_GPIO_PIN_9
 
 #define BLINK_PERIOD_MS 500U
 #define BLINK_STACK     configMINIMAL_STACK_SIZE
@@ -16,19 +19,27 @@ static StaticTask_t blink_tcb;
 
 static void leds_init(void)
 {
-    RCC->AHB1ENR |= RCC_AHB1ENR_GPIOBEN | RCC_AHB1ENR_GPIOCEN;
-    (void)RCC->AHB1ENR;
+    LL_AHB1_GRP1_EnableClock(LL_AHB1_GRP1_PERIPH_GPIOB | LL_AHB1_GRP1_PERIPH_GPIOC);
 
     // Éteintes (broche haute) avant de passer en sortie.
-    GPIOC->BSRR = 1U << LED_BLUE_PIN;
-    GPIOB->BSRR = 1U << LED_RED_PIN;
-    GPIOC->MODER = (GPIOC->MODER & ~(3U << (LED_BLUE_PIN * 2))) | (1U << (LED_BLUE_PIN * 2));
-    GPIOB->MODER = (GPIOB->MODER & ~(3U << (LED_RED_PIN * 2))) | (1U << (LED_RED_PIN * 2));
+    LL_GPIO_SetOutputPin(LED_BLUE_PORT, LED_BLUE_PIN);
+    LL_GPIO_SetOutputPin(LED_RED_PORT, LED_RED_PIN);
+
+    LL_GPIO_InitTypeDef gpio;
+    LL_GPIO_StructInit(&gpio);
+    gpio.Mode = LL_GPIO_MODE_OUTPUT;
+    gpio.OutputType = LL_GPIO_OUTPUT_PUSHPULL;
+    gpio.Speed = LL_GPIO_SPEED_FREQ_LOW;
+
+    gpio.Pin = LED_BLUE_PIN;
+    LL_GPIO_Init(LED_BLUE_PORT, &gpio);
+    gpio.Pin = LED_RED_PIN;
+    LL_GPIO_Init(LED_RED_PORT, &gpio);
 }
 
 static void led_red_on(void)
 {
-    GPIOB->BSRR = 1U << (LED_RED_PIN + 16);
+    LL_GPIO_ResetOutputPin(LED_RED_PORT, LED_RED_PIN);
 }
 
 static void blink_task(void *arg)
@@ -37,7 +48,7 @@ static void blink_task(void *arg)
     TickType_t wake = xTaskGetTickCount();
 
     for (;;) {
-        GPIOC->ODR ^= 1U << LED_BLUE_PIN;
+        LL_GPIO_TogglePin(LED_BLUE_PORT, LED_BLUE_PIN);
         xTaskDelayUntil(&wake, pdMS_TO_TICKS(BLINK_PERIOD_MS));
     }
 }
