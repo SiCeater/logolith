@@ -1,5 +1,7 @@
 #include "FreeRTOS.h"
+#include "SEGGER_RTT.h"
 #include "clock.h"
+#include "log.h"
 #include "stm32f4xx_ll_bus.h"
 #include "stm32f4xx_ll_gpio.h"
 #include "task.h"
@@ -10,7 +12,7 @@
 #define LED_RED_PORT  GPIOB
 #define LED_RED_PIN   LL_GPIO_PIN_9
 
-#define BLINK_PERIOD_MS 500U
+#define BLINK_PERIOD_MS 420U
 #define BLINK_STACK     configMINIMAL_STACK_SIZE
 #define BLINK_PRIORITY  (tskIDLE_PRIORITY + 1)
 
@@ -50,6 +52,7 @@ static void blink_task(void *arg)
     for (;;) {
         LL_GPIO_TogglePin(LED_BLUE_PORT, LED_BLUE_PIN);
         xTaskDelayUntil(&wake, pdMS_TO_TICKS(BLINK_PERIOD_MS));
+        log_info(LOG_NORMAL, "LED toggled!");
     }
 }
 
@@ -63,6 +66,8 @@ int main(void)
         for (;;) {
         }
     }
+
+    SEGGER_RTT_WriteString(0, "Firmware démarré\r\n"); // 0 = canal de sortie par défaut SEGGER
 
     xTaskCreateStatic(blink_task, "blink", BLINK_STACK, NULL, BLINK_PRIORITY, blink_stack, &blink_tcb);
     vTaskStartScheduler();

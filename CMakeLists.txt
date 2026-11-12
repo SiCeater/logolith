@@ -35,6 +35,7 @@ include(cmake/banner.cmake)
 add_executable(logolith
     src/main.c
     src/clock.c
+    src/log.c
     ${cmsis_device_f4_SOURCE_DIR}/Source/Templates/system_stm32f4xx.c
     ${cmsis_device_f4_SOURCE_DIR}/Source/Templates/gcc/startup_stm32f405xx.s
 )
@@ -43,7 +44,7 @@ target_include_directories(logolith PRIVATE src)
 target_compile_options(logolith PRIVATE
     $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -Wshadow -Wconversion -Wno-sign-conversion>
 )
-target_link_libraries(logolith PRIVATE cmsis stm32_ll freertos_kernel)
+target_link_libraries(logolith PRIVATE cmsis stm32_ll freertos_kernel segger_rtt)
 set(LINKER_SCRIPT ${CMAKE_SOURCE_DIR}/linker/STM32F405RGTx_FLASH.ld)
 target_link_options(logolith PRIVATE
     -T${LINKER_SCRIPT}

@@ -36,13 +36,30 @@ FetchContent_Declare(stm32f4_ll
     SOURCE_SUBDIR  none
 )
 
-FetchContent_MakeAvailable(cmsis_core cmsis_device_f4 stm32f4_ll)
+FetchContent_Declare(segger_rtt
+    GIT_REPOSITORY  https://github.com/SEGGERMicro/RTT.git
+    GIT_TAG         V8.58.0
+    GIT_SHALLOW     TRUE
+    SOURCE_SUBDIR   NONE
+)
+
+FetchContent_MakeAvailable(cmsis_core cmsis_device_f4 stm32f4_ll segger_rtt)
 
 # CMSIS : registres du cœur Cortex-M4 et des périphériques du STM32F4.
 add_library(cmsis INTERFACE)
 target_include_directories(cmsis SYSTEM INTERFACE
     ${cmsis_core_SOURCE_DIR}/CMSIS/Core/Include
     ${cmsis_device_f4_SOURCE_DIR}/Include
+)
+
+add_library(segger_rtt STATIC
+    ${segger_rtt_SOURCE_DIR}/RTT/SEGGER_RTT.c
+    ${segger_rtt_SOURCE_DIR}/RTT/SEGGER_RTT_printf.c
+)
+
+target_include_directories(segger_rtt SYSTEM PUBLIC
+    ${segger_rtt_SOURCE_DIR}/RTT
+    ${segger_rtt_SOURCE_DIR}/Config
 )
 
 # LL (Low-Layer) de ST : fonctions inline sur les registres (en-têtes stm32f4xx_ll_*.h) et fonctions

@@ -16,5 +16,6 @@
 
   "files.associations": {
     "*.ld": "linkerscript"
-  }
+  },
+  "cortex-debug.variableUseNaturalFormat": true
 }
