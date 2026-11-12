@@ -1,0 +1,30 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Déboguer (ST-Link, OpenOCD)",
+      "type": "cortex-debug",
+      "request": "launch",
+      "servertype": "openocd",
+      "configFiles": ["interface/stlink.cfg", "target/stm32f4x.cfg"],
+      "cwd": "${workspaceFolder}",
+      "executable": "${workspaceFolder}/build/debug/logolith.elf",
+      "svdFile": "${workspaceFolder}/build/debug/STM32F405.svd",
+      "rtos": "FreeRTOS",
+      "runToEntryPoint": "main",
+      "preLaunchTask": "Compiler (debug)",
+      "showDevDebugOutput": "none"
+    },
+    {
+      "name": "S'attacher sans reflasher (ST-Link, OpenOCD)",
+      "type": "cortex-debug",
+      "request": "attach",
+      "servertype": "openocd",
+      "configFiles": ["interface/stlink.cfg", "target/stm32f4x.cfg"],
+      "cwd": "${workspaceFolder}",
+      "executable": "${workspaceFolder}/build/debug/logolith.elf",
+      "svdFile": "${workspaceFolder}/build/debug/STM32F405.svd",
+      "rtos": "FreeRTOS"
+    }
+  ]
+}

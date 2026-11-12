@@ -1,0 +1,11 @@
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-reserved-identifier,
+  clang-analyzer-*,
+  misc-redundant-expression,
+  performance-*,
+  readability-braces-around-statements,
+  readability-misleading-indentation
+HeaderFilterRegex: '^(src|config)/'
