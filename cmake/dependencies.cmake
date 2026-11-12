@@ -7,6 +7,7 @@ include(FetchContent)
 set(LOGOLITH_CMSIS_CORE_TAG v6.1.0)
 set(LOGOLITH_CMSIS_F4_TAG v2.6.10)
 set(LOGOLITH_FREERTOS_TAG V11.1.0)
+set(LOGOLITH_STM32F4_LL_TAG v1.8.6)
 
 FetchContent_Declare(cmsis_core
     GIT_REPOSITORY https://github.com/ARM-software/CMSIS_6.git
@@ -26,7 +27,16 @@ FetchContent_Declare(freertos_kernel
     GIT_SHALLOW    TRUE
 )
 
-FetchContent_MakeAvailable(cmsis_core cmsis_device_f4)
+# Le dépôt contient la HAL et la LL ; seule la LL est utilisée. SOURCE_SUBDIR inexistant : on récupère
+# seulement les sources, la bibliothèque est définie plus bas.
+FetchContent_Declare(stm32f4_ll
+    GIT_REPOSITORY https://github.com/STMicroelectronics/stm32f4xx-hal-driver.git
+    GIT_TAG        ${LOGOLITH_STM32F4_LL_TAG}
+    GIT_SHALLOW    TRUE
+    SOURCE_SUBDIR  none
+)
+
+FetchContent_MakeAvailable(cmsis_core cmsis_device_f4 stm32f4_ll)
 
 # CMSIS : registres du cœur Cortex-M4 et des périphériques du STM32F4.
 add_library(cmsis INTERFACE)
@@ -34,6 +44,16 @@ target_include_directories(cmsis SYSTEM INTERFACE
     ${cmsis_core_SOURCE_DIR}/CMSIS/Core/Include
     ${cmsis_device_f4_SOURCE_DIR}/Include
 )
+
+# LL (Low-Layer) de ST : fonctions inline sur les registres (en-têtes stm32f4xx_ll_*.h) et fonctions
+# d'initialisation par structure (LL_GPIO_Init, LL_USART_Init...), activées par USE_FULL_LL_DRIVER.
+# fmc, fsmc, sdmmc et usb sont des briques internes de la HAL : elles ne compilent pas sans elle.
+file(GLOB STM32_LL_SOURCES ${stm32f4_ll_SOURCE_DIR}/Src/stm32f4xx_ll_*.c)
+list(FILTER STM32_LL_SOURCES EXCLUDE REGEX "_ll_(fmc|fsmc|sdmmc|usb)\\.c$")
+add_library(stm32_ll STATIC ${STM32_LL_SOURCES})
+target_include_directories(stm32_ll SYSTEM PUBLIC ${stm32f4_ll_SOURCE_DIR}/Inc)
+target_compile_definitions(stm32_ll PUBLIC USE_FULL_LL_DRIVER)
+target_link_libraries(stm32_ll PUBLIC cmsis)
 
 # FreeRTOS lit sa configuration dans la cible freertos_config, qui doit exister avant le noyau.
 # Pas de FREERTOS_HEAP : allocation statique uniquement (voir config/FreeRTOSConfig.h).

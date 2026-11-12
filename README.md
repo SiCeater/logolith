@@ -15,8 +15,11 @@ cmake/          toolchain, dépendances, cibles de flash
 .github/        CI : format et compilation debug + release à chaque push
 ```
 
-Dépendances (FreeRTOS-Kernel, CMSIS 6, CMSIS STM32F4, fichier SVD) téléchargées au premier configure, versions
-figées dans [cmake/dependencies.cmake](cmake/dependencies.cmake). Accès au matériel par les registres (CMSIS), sans HAL.
+Dépendances (FreeRTOS-Kernel, CMSIS 6, CMSIS STM32F4, drivers LL de ST, fichier SVD) téléchargées au premier
+configure, versions figées dans [cmake/dependencies.cmake](cmake/dependencies.cmake).
+
+Accès au matériel par les registres (CMSIS) ou par la couche LL de ST (`#include "stm32f4xx_ll_gpio.h"`, etc.), sans
+HAL. Doc de la LL : UM1725 de ST.
 
 ## Installer
 
@@ -74,6 +77,8 @@ Affichage : bannière au configure, rapport en fin de build (étapes, mémoire, 
 - Zéro warning : ils sont traités comme des erreurs.
 - Pas d'allocation dynamique : tâches et objets FreeRTOS en version `...Static`.
 - Interruptions de priorité NVIC 0 à 4 : aucun appel FreeRTOS. De 5 à 15 : seulement les fonctions `...FromISR`.
+- Pas de `LL_Init1msTick` ni de `LL_mDelay` : ils reprogramment SysTick, que FreeRTOS utilise. Dans une tâche,
+  `vTaskDelay`.
 - Valeur tirée d'une datasheet ou du manuel de référence (RM0090) : citer la section en commentaire.
 
 ## Licence

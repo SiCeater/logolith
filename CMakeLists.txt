@@ -43,7 +43,7 @@ target_include_directories(logolith PRIVATE src)
 target_compile_options(logolith PRIVATE
     $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -Wshadow -Wconversion -Wno-sign-conversion>
 )
-target_link_libraries(logolith PRIVATE cmsis freertos_kernel)
+target_link_libraries(logolith PRIVATE cmsis stm32_ll freertos_kernel)
 set(LINKER_SCRIPT ${CMAKE_SOURCE_DIR}/linker/STM32F405RGTx_FLASH.ld)
 target_link_options(logolith PRIVATE
     -T${LINKER_SCRIPT}

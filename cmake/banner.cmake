@@ -60,7 +60,7 @@ endif()
 _banner_row(r1 "cible" "${C_BOLD}LithCore${C_RESET} ${C_GREY}${G_DOT}${C_RESET} STM32F405RG ${C_GREY}${G_DOT}${C_RESET} Cortex-M4F ${C_GREY}${G_DOT}${C_RESET} quartz 8 MHz")
 _banner_row(r2 "preset" "${C_CYAN}${_preset}${C_RESET} ${C_GREY}(${CMAKE_BUILD_TYPE} ${_flags})${C_RESET}")
 _banner_row(r3 "compilateur" "${_cc} ${C_BOLD}${CMAKE_C_COMPILER_VERSION}${C_RESET}")
-_banner_row(r4 "dépendances" "FreeRTOS ${C_BLUE}${LOGOLITH_FREERTOS_TAG}${C_RESET} ${C_GREY}${G_DOT}${C_RESET} CMSIS ${C_BLUE}${LOGOLITH_CMSIS_CORE_TAG}${C_RESET} ${C_GREY}${G_DOT}${C_RESET} CMSIS F4 ${C_BLUE}${LOGOLITH_CMSIS_F4_TAG}${C_RESET}")
+_banner_row(r4 "dépendances" "FreeRTOS ${C_BLUE}${LOGOLITH_FREERTOS_TAG}${C_RESET} ${C_GREY}${G_DOT}${C_RESET} CMSIS ${C_BLUE}${LOGOLITH_CMSIS_CORE_TAG}${C_RESET} ${C_GREY}${G_DOT}${C_RESET} CMSIS F4 ${C_BLUE}${LOGOLITH_CMSIS_F4_TAG}${C_RESET} ${C_GREY}${G_DOT}${C_RESET} LL ${C_BLUE}${LOGOLITH_STM32F4_LL_TAG}${C_RESET}")
 _banner_row(r5 "contrôles" "${_werror}")
 _banner_row(r6 "flash" "${_flash}")
 
