@@ -4,6 +4,10 @@
 #include "main.h"
 #include "global.h"
 
+/* Console de debug sur UART5 (broche DEBUG_TX, PC12), voir debug.c.
+ * TOUTES ces fonctions sont BLOQUANTES : elles attendent que chaque octet soit
+ * parti. Un print depuis une interruption retarde tout le reste du firmware. */
+
 void UART_Debug_Transmit_Char_LL(uint8_t c);
 void UART_Debug_Transmit_Buffer_LL(uint8_t *data, uint16_t size);
 void print_gyro_data(int16_t dps_x10);

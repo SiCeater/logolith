@@ -1,7 +1,7 @@
 #ifndef __LED_DRIVER_H__
 #define __LED_DRIVER_H__
 
-#include "main.h"
+#include "main.h"   /* labels CubeMX N_R_LED / N_B_LED (actives à l'état bas, voir led_driver.c) */
 
 void R_LED_On();
 void R_LED_Off();

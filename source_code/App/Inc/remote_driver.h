@@ -38,6 +38,7 @@
 #define CRSF_CHANNEL_VALUE_MID      992
 #define CRSF_CHANNEL_VALUE_MAX      1811
 #define CRSF_FAILSAFE_TIMEOUT_MS    100    // ~10 paquets manqués @100Hz
+#define CRSF_RC_CHANNELS_LEN        24     // champ LEN d'une trame 0x16 : TYPE + 22 + CRC
 
 /* --- Tuning traitement RC (application layer) --- */
 #define CRSF_RC_DEADZONE             0.03f
@@ -62,11 +63,12 @@ typedef struct {
     uint32_t last_rx_ms;    // horodatage dernier octet -> timeout resync
 } crsf_parser_t;
 
+/* Écrit dans l'IRQ USART2, lu en contexte principal -> champs volatile */
 typedef struct {
-    uint16_t    ch[16];               // 16 canaux, valeurs 172-1811
-    uint32_t    last_update_ms;       // horodatage dernière trame 0x16 valide
-    bool        first_frame_received; // handshake initial OK
-    bool        valid;
+    uint16_t            ch[16];               // 16 canaux, valeurs 172-1811
+    volatile uint32_t   last_update_ms;       // horodatage dernière trame 0x16 valide
+    volatile bool       first_frame_received; // handshake initial OK
+    volatile bool       valid;                /* jamais remis à false : utiliser rc_is_valid() */
 } crsf_rc_t;
 
 typedef struct {
@@ -101,7 +103,10 @@ typedef struct {
 } rc_axes_t;
 
 typedef struct {
-    bool            armed;          // CH5
+    bool            armed;          // CH5 (> 992 = armé). Forcé à false en failsafe.
+                                    // /!\ CH5 = SA est un POUSSOIR sur la radio : à remplacer
+                                    // par un switch à position stable (SF = CH10, verrouillable ?)
+                                    // /!\ aucun moteur ne dépend encore de ce flag (cf. security.c)
     flight_mode_t   flight_mode;    // CH6
     bool            beeper;         // CH7
     bool            blackbox;       // CH8
@@ -133,6 +138,7 @@ extern crsf_device_info_t  crsf_device;
 extern rc_axes_t           rc_axes;
 extern rc_switches_t       rc_switches;
 extern rc_failsafe_t       rc_failsafe;
+extern uint16_t            rc_ch[16];      // canaux bruts, snapshot de Remote_Process
 
 /* ==========================================================================
  * API publique
@@ -145,7 +151,10 @@ void Remote_Init(void);
  * au-delà de cet appel unique. */
 void Remote_UART_IdleHandler(void);
 
-/* À appeler périodiquement (ta slow loop, ex 400 Hz) avec le dt réel en secondes.
+/* À appeler périodiquement avec le dt réel en secondes : slow loop de main.c, ~500 Hz.
+ * Tant qu'elle n'est pas appelée, rc_axes / rc_switches / rc_ch / rc_failsafe ne sont
+ * PAS mis à jour (seuls les canaux bruts crsf_rc.ch le sont, par l'IRQ).
+ * Une trame ELRS arrive toutes les 2 à 20 ms selon le packet rate : 500 Hz suffit.
  * Calcule failsafe, décodage switches, normalisation + filtrage des axes. */
 void Remote_Process(float dt);
 

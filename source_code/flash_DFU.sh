@@ -7,7 +7,8 @@ IFS=$'\n\t'
 #######################################
 
 CUBE_CLI="/Applications/STMicroelectronics/STM32Cube/STM32CubeProgrammer/STM32CubeProgrammer.app/Contents/Resources/bin/STM32_Programmer_CLI"
-ELF_PATH="/Users/olivierchevilley/Projets/STM_Embedded/drone_F405_AG3XF4_V5/build/Debug/drone_F405_AG3XF4_V5.elf"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ELF_PATH="$SCRIPT_DIR/build/Debug/Logolith.elf"
 
 STM32_VID="0483"
 STM32_DFU_PID="df11"

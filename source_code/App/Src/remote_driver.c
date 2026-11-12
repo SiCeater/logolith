@@ -22,6 +22,7 @@ crsf_device_info_t  crsf_device;
 rc_axes_t           rc_axes;
 rc_switches_t       rc_switches;
 rc_failsafe_t       rc_failsafe;
+uint16_t            rc_ch[16];      // snapshot des canaux bruts (172-1811), mis à jour par Remote_Process
 
 /* Table CRC8 — générée une fois au boot (256*8 opérations, négligeable) */
 static uint8_t crsf_crc8_tab[256];
@@ -104,35 +105,6 @@ void crsf_unpack_channels(const uint8_t *payload, uint16_t out[16])
  * Fonctions de debug UART5 — affichage console, ASCII, pas de float
  * ========================================================================== */
 
- /* Convertit un octet en 2 caractères hexa ASCII */
-static void byte_to_hex(uint8_t b, char *out)
-{
-    static const char hex[] = "0123456789ABCDEF";
-    out[0] = hex[(b >> 4) & 0x0F];
-    out[1] = hex[b & 0x0F];
-}
-
-/* Dump une trame CRSF complète en hexa sur UART5, format :
- * "RX [C8 18 16 E0 03 ... CRC]\r\n"
- */
-static void crsf_debug_print_frame(const uint8_t *frame, uint8_t total_len)
-{
-    char line[3 * CRSF_FRAME_MAX_SIZE + 8];  // "RX [" + hex pairs + " ]\r\n"
-    uint16_t pos = 0;
-
-    line[pos++] = 'R'; line[pos++] = 'X'; line[pos++] = ' '; line[pos++] = '[';
-
-    for (uint8_t i = 0; i < total_len; i++) {
-        byte_to_hex(frame[i], &line[pos]);
-        pos += 2;
-        line[pos++] = ' ';
-    }
-
-    line[pos++] = ']'; line[pos++] = '\r'; line[pos++] = '\n';
-
-    UART_Debug_Transmit_Buffer_LL((uint8_t *)line, pos);
-}
-
  /* Convertit un uint16_t (0-1811) en ASCII décimal, retourne nb caractères écrits */
 static uint8_t uint16_to_dec(uint16_t val, char *out)
 {
@@ -155,21 +127,44 @@ static uint8_t uint16_to_dec(uint16_t val, char *out)
     return n;
 }
 
-/* Dump lisible des 16 canaux CRSF en décimal, format :
- * "CH: 992 992 172 992 172 1811 992 172 992 992 992 992 992 992 992 992\r\n"
- */
-static void crsf_debug_print_channels(const uint16_t ch[16])
+/* ── Debug RX (debug_rc), même principe que debug_imu ──────────────────────
+ * Appelé depuis Remote_Process (boucle principale ~500 Hz), JAMAIS depuis l'ISR :
+ * avant, chaque trame (jusqu'à 500-1000/s) était imprimée dans l'IRQ USART2, soit
+ * ~0,8 ms de print bloquant par trame → console saturée et IRQ monopolisée.
+ * Ici : une ligne toutes les CRSF_DEBUG_PERIOD_MS (5 Hz), format :
+ *   "RC LQ:100 THR:0% CH: 992 992 172 992 1811 172 172 1811 992 992 992 992"
+ *   (12 premiers canaux bruts 172-1811, CH1 en premier ; LQ = link quality %)
+ * ou "RC: pas de lien (failsafe)" si aucune trame valide depuis 100 ms. */
+#define CRSF_DEBUG_PERIOD_MS   200U
+#define CRSF_DEBUG_NB_CH       12U     /* la radio n'envoie que 12 canaux utiles */
+
+static void crsf_debug_print(const uint16_t ch[16], bool link_ok, uint32_t now)
 {
-    char line[16 * 5 + 8];  // 16 canaux x (4 chiffres max + espace) + "CH: " + "\r\n"
-    uint16_t pos = 0;
+    static uint32_t last_print_ms = 0;
+    if ((now - last_print_ms) < CRSF_DEBUG_PERIOD_MS) return;
+    last_print_ms = now;
 
-    line[pos++] = 'C'; line[pos++] = 'H'; line[pos++] = ':'; line[pos++] = ' ';
-
-    for (uint8_t i = 0; i < 16; i++) {
-        pos += uint16_to_dec(ch[i], &line[pos]);
-        line[pos++] = ' ';
+    if (!link_ok) {
+        static const char msg[] = "RC: pas de lien (failsafe)\r\n";
+        UART_Debug_Transmit_Buffer_LL((uint8_t *)msg, sizeof(msg) - 1U);   /* -1 : sans le NUL */
+        return;
     }
 
+    char line[16 + 12 + 6 + CRSF_DEBUG_NB_CH * 5U + 2U];
+    uint16_t pos = 0;
+
+    memcpy(&line[pos], "RC LQ:", 6); pos += 6;
+    pos += uint16_to_dec(crsf_link.uplink_lq, &line[pos]);   /* 0 tant qu'aucune trame LINK_STATISTICS */
+
+    memcpy(&line[pos], " THR:", 5); pos += 5;
+    pos += uint16_to_dec((uint16_t)(rc_axes.throttle * 100.0f + 0.5f), &line[pos]);
+    line[pos++] = '%';
+
+    memcpy(&line[pos], " CH:", 4); pos += 4;
+    for (uint8_t i = 0; i < CRSF_DEBUG_NB_CH; i++) {
+        line[pos++] = ' ';
+        pos += uint16_to_dec(ch[i], &line[pos]);
+    }
     line[pos++] = '\r'; line[pos++] = '\n';
 
     UART_Debug_Transmit_Buffer_LL((uint8_t *)line, pos);
@@ -214,10 +209,6 @@ void crsf_parse_byte(crsf_parser_t *p, uint8_t byte)
             uint8_t crc = crsf_crc8(&p->frame[2], p->frame_len - 1);
             if (crc == p->frame[p->idx - 1]) {
 
-                if (p->frame[2] != CRSF_FRAMETYPE_RC_CHANNELS) {
-                  if(debug_rc) crsf_debug_print_frame(p->frame, p->idx);   // hexa, tout sauf les channels
-                }
-
                 crsf_dispatch_frame(p->frame);
             /* CRC KO -> frame droppée silencieusement, le watchdog
              * failsafe applicatif absorbe la perte de ce cycle */
@@ -240,12 +231,12 @@ void crsf_dispatch_frame(const uint8_t *frame)
     switch (type) {
 
     case CRSF_FRAMETYPE_RC_CHANNELS:
+        /* LEN = TYPE(1) + 22 octets canaux + CRC(1) : on refuse toute autre taille */
+        if (frame[1] != CRSF_RC_CHANNELS_LEN) break;
         crsf_unpack_channels(payload, crsf_rc.ch);
         crsf_rc.last_update_ms       = get_ms();
         crsf_rc.first_frame_received = true;
         crsf_rc.valid                = true;
-
-        if(debug_rc) crsf_debug_print_channels(crsf_rc.ch);   // ← décimal, lisible
 
         break;
 
@@ -265,10 +256,10 @@ void crsf_dispatch_frame(const uint8_t *frame)
         break;
 
     case CRSF_FRAMETYPE_DEVICE_PING:
-        /* Le récepteur ELRS peut ping le bus au boot. On ne répond pas
-         * (USART2 configuré RX only ici) — on note juste l'event si besoin
-         * de debug. Pas de TX = pas de réponse DEVICE_INFO possible tant
-         * que l'UART n'est pas basculé en half-duplex bidirectionnel. */
+        /* Le récepteur ELRS peut "pinger" le bus au boot. On ne répond pas :
+         * USART2 est configuré TX_RX dans CubeMX, mais le driver n'émet jamais
+         * (pas de télémétrie vers la radio pour l'instant). Répondre DEVICE_INFO
+         * demanderait d'écrire sur RC_TX (PA2). */
         break;
 
     case CRSF_FRAMETYPE_DEVICE_INFO: {
@@ -373,43 +364,62 @@ static float pt1_update(pt1_state_t *s, float x, float dt, float fc)
 
 bool rc_is_valid(void)
 {
+    /* last_update_ms est écrit par l'IRQ USART2 : le lire AVANT get_ms(),
+     * sinon une trame arrivée entre les deux donne last > now et la
+     * soustraction non signée explose (~4e9 ms) -> faux failsafe. */
+    uint32_t last = crsf_rc.last_update_ms;
     return crsf_rc.first_frame_received &&
-           (get_ms() - crsf_rc.last_update_ms) < CRSF_FAILSAFE_TIMEOUT_MS;
+           (get_ms() - last) < CRSF_FAILSAFE_TIMEOUT_MS;
 }
 
 void Remote_Process(float dt)
 {
-    uint32_t now = get_ms();
+    /* Snapshot cohérent des canaux : l'IRQ USART2 peut réécrire ch[] en
+     * plein milieu de la lecture (canaux de deux trames différentes). */
+    uint16_t ch[16];
+    __disable_irq();
+    uint32_t last = crsf_rc.last_update_ms;
+    bool     got  = crsf_rc.first_frame_received;
+    memcpy(ch, (const void *)crsf_rc.ch, sizeof(ch));
+    __enable_irq();
+
+    uint32_t now = get_ms();   // lu APRÈS last (cf. rc_is_valid)
 
     /* --- 1. Failsafe : gate absolue avant tout traitement --- */
-    if (!crsf_rc.first_frame_received ||
-        (now - crsf_rc.last_update_ms) > CRSF_FAILSAFE_TIMEOUT_MS) {
+    /* Même seuil que rc_is_valid() (>= ici, < là-bas) : les deux sont toujours d'accord. */
+    if (!got || (now - last) >= CRSF_FAILSAFE_TIMEOUT_MS) {
 
         if (rc_failsafe.state != FAILSAFE_ACTIVE) {
             rc_failsafe.active_since_ms = now;
             rc_failsafe.count++;
         }
         rc_failsafe.state     = FAILSAFE_ACTIVE;
+        rc_switches.armed     = false;  // sinon l'état armé reste figé à sa dernière valeur
+        rc_axes.throttle      = 0.0f;
         rc_axes.throttle_filt = 0.0f;   // coupe le throttle, ne pas toucher roll/pitch
+        lpf_throttle.y        = 0.0f;   // repart de 0 au retour du lien (pas de saut)
+        if (debug_rc) crsf_debug_print(ch, false, now);
         return;
     }
 
     rc_failsafe.state = (crsf_link.valid && crsf_link.uplink_lq < 50)
                        ? FAILSAFE_WARN : FAILSAFE_OK;
 
+    memcpy(rc_ch, ch, sizeof(rc_ch));   // valeurs brutes, uniquement quand le lien est OK
+
     /* --- 2. Switches --- */
-    rc_switches.armed       = rc_decode_switch_2pos(crsf_rc.ch[4]);
-    rc_switches.flight_mode = rc_decode_switch_3pos(crsf_rc.ch[5]);
-    rc_switches.beeper      = rc_decode_switch_2pos(crsf_rc.ch[6]);
-    rc_switches.blackbox    = rc_decode_switch_2pos(crsf_rc.ch[7]);
+    rc_switches.armed       = rc_decode_switch_2pos(ch[4]);
+    rc_switches.flight_mode = rc_decode_switch_3pos(ch[5]);
+    rc_switches.beeper      = rc_decode_switch_2pos(ch[6]);
+    rc_switches.blackbox    = rc_decode_switch_2pos(ch[7]);
     for (int i = 0; i < 8; i++)
-        rc_switches.aux[i] = crsf_rc.ch[8 + i];
+        rc_switches.aux[i] = ch[8 + i];
 
     /* --- 3. Axes : normalisation --- */
-    float roll  = rc_normalize_centered(crsf_rc.ch[0]);
-    float pitch = rc_normalize_centered(crsf_rc.ch[1]);
-    float thr   = rc_normalize_throttle(crsf_rc.ch[2]);
-    float yaw   = rc_normalize_centered(crsf_rc.ch[3]);
+    float roll  = rc_normalize_centered(ch[0]);
+    float pitch = rc_normalize_centered(ch[1]);
+    float thr   = rc_normalize_throttle(ch[2]);
+    float yaw   = rc_normalize_centered(ch[3]);
 
     /* --- 4. Deadzone + expo (pas sur le throttle) --- */
     roll  = apply_expo(apply_deadzone(roll,  CRSF_RC_DEADZONE), CRSF_RC_EXPO_RATE);
@@ -424,6 +434,8 @@ void Remote_Process(float dt)
     rc_axes.pitch_filt    = pt1_update(&lpf_pitch,    pitch, dt, CRSF_RC_LPF_HZ);
     rc_axes.throttle_filt = pt1_update(&lpf_throttle, thr,   dt, CRSF_RC_LPF_HZ);
     rc_axes.yaw_filt      = pt1_update(&lpf_yaw,      yaw,   dt, CRSF_RC_LPF_HZ);
+
+    if (debug_rc) crsf_debug_print(ch, true, now);
 }
 
 /* ==========================================================================

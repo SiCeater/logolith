@@ -7,6 +7,7 @@
 #include "debug.h"
 #include "led_driver.h"
 
-void connection_lost_routine();
+/* Squelette, non appelée pour l'instant : voir security.c */
+void connection_lost_routine(void);
 
 #endif

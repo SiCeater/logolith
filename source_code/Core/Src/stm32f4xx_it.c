@@ -190,6 +190,7 @@ void SysTick_Handler(void)
   /* USER CODE END SysTick_IRQn 0 */
 
   /* USER CODE BEGIN SysTick_IRQn 1 */
+  ms_counter++;
 
   /* USER CODE END SysTick_IRQn 1 */
 }
@@ -240,12 +241,10 @@ void DMA1_Stream5_IRQHandler(void)
 void USART2_IRQHandler(void)
 {
   /* USER CODE BEGIN USART2_IRQn 0 */
-
   Remote_UART_IdleHandler();
-
   /* USER CODE END USART2_IRQn 0 */
   /* USER CODE BEGIN USART2_IRQn 1 */
-
+  
   /* USER CODE END USART2_IRQn 1 */
 }
 

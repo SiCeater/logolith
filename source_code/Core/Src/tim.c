@@ -65,7 +65,6 @@ void MX_TIM1_Init(void)
   LL_TIM_OC_Init(TIM1, LL_TIM_CHANNEL_CH2, &TIM_OC_InitStruct);
   LL_TIM_OC_DisableFast(TIM1, LL_TIM_CHANNEL_CH2);
   LL_TIM_OC_EnablePreload(TIM1, LL_TIM_CHANNEL_CH3);
-  TIM_OC_InitStruct.CompareValue = 0;
   LL_TIM_OC_Init(TIM1, LL_TIM_CHANNEL_CH3, &TIM_OC_InitStruct);
   LL_TIM_OC_DisableFast(TIM1, LL_TIM_CHANNEL_CH3);
   LL_TIM_SetTriggerOutput(TIM1, LL_TIM_TRGO_RESET);
@@ -116,7 +115,7 @@ void MX_TIM3_Init(void)
   /* USER CODE END TIM3_Init 1 */
   TIM_InitStruct.Prescaler = 6;
   TIM_InitStruct.CounterMode = LL_TIM_COUNTERMODE_UP;
-  TIM_InitStruct.Autoreload = 23999;
+  TIM_InitStruct.Autoreload = 11999;
   TIM_InitStruct.ClockDivision = LL_TIM_CLOCKDIVISION_DIV1;
   LL_TIM_Init(TIM3, &TIM_InitStruct);
   LL_TIM_DisableARRPreload(TIM3);
@@ -124,7 +123,7 @@ void MX_TIM3_Init(void)
   TIM_OC_InitStruct.OCMode = LL_TIM_OCMODE_PWM1;
   TIM_OC_InitStruct.OCState = LL_TIM_OCSTATE_DISABLE;
   TIM_OC_InitStruct.OCNState = LL_TIM_OCSTATE_DISABLE;
-  TIM_OC_InitStruct.CompareValue = 3000;
+  TIM_OC_InitStruct.CompareValue = 1500;
   TIM_OC_InitStruct.OCPolarity = LL_TIM_OCPOLARITY_HIGH;
   LL_TIM_OC_Init(TIM3, LL_TIM_CHANNEL_CH4, &TIM_OC_InitStruct);
   LL_TIM_OC_DisableFast(TIM3, LL_TIM_CHANNEL_CH4);
@@ -212,7 +211,7 @@ void MX_TIM8_Init(void)
     PC8     ------> TIM8_CH3
     PC9     ------> TIM8_CH4
     */
-  GPIO_InitStruct.Pin = ESC_M3_Pin|ESC_M2_Pin|ESC_M4_Pin|ESC_M1_Pin;
+  GPIO_InitStruct.Pin = ESC_M1_Pin|ESC_M2_Pin|ESC_M3_Pin|ESC_M4_Pin;
   GPIO_InitStruct.Mode = LL_GPIO_MODE_ALTERNATE;
   GPIO_InitStruct.Speed = LL_GPIO_SPEED_FREQ_LOW;
   GPIO_InitStruct.OutputType = LL_GPIO_OUTPUT_PUSHPULL;

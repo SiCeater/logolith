@@ -99,13 +99,13 @@ void MX_GPIO_Init(void)
   LL_EXTI_Init(&EXTI_InitStruct);
 
   /**/
-  LL_GPIO_SetPinPull(ICM42688_INT_GPIO_Port, ICM42688_INT_Pin, LL_GPIO_PULL_NO);
+  LL_GPIO_SetPinPull(ICM42688_INT2_GPIO_Port, ICM42688_INT2_Pin, LL_GPIO_PULL_NO);
 
   /**/
-  LL_GPIO_SetPinMode(ICM42688_INT_GPIO_Port, ICM42688_INT_Pin, LL_GPIO_MODE_INPUT);
+  LL_GPIO_SetPinMode(ICM42688_INT2_GPIO_Port, ICM42688_INT2_Pin, LL_GPIO_MODE_INPUT);
 
   /* EXTI interrupt init*/
-  NVIC_SetPriority(EXTI4_IRQn, NVIC_EncodePriority(NVIC_GetPriorityGrouping(),0, 0));
+  NVIC_SetPriority(EXTI4_IRQn, NVIC_EncodePriority(NVIC_GetPriorityGrouping(),1, 0));
   NVIC_EnableIRQ(EXTI4_IRQn);
 
 }

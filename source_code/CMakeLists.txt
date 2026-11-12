@@ -44,7 +44,7 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 
 # Add sources to executable
 # Automatically include all user sources
-file(GLOB_RECURSE USER_SOURCES
+file(GLOB_RECURSE USER_SOURCES CONFIGURE_DEPENDS
     ${CMAKE_SOURCE_DIR}/App/Src/*.c
 )
 
@@ -61,6 +61,12 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
 target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined symbols
 )
+
+# Protège le secteur flash 11 (stockage calibration) : link en erreur si le firmware y déborde
+target_link_options(${CMAKE_PROJECT_NAME} PRIVATE
+    "${CMAKE_SOURCE_DIR}/calib_guard.ld"
+)
+set_property(TARGET ${CMAKE_PROJECT_NAME} APPEND PROPERTY LINK_DEPENDS "${CMAKE_SOURCE_DIR}/calib_guard.ld")
 
 # Remove wrong libob.a library dependency when using cpp files
 list(REMOVE_ITEM CMAKE_C_IMPLICIT_LINK_LIBRARIES ob)

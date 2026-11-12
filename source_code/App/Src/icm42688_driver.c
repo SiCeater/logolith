@@ -1,7 +1,7 @@
 /**
  * icm42688_driver.c
  * Driver LL ICM-42688-P — SPI1 + DMA2 — STM32F405
- * Gyro and accel, fast loop 1kHz, Low-Noise mode, AAF enabled
+ * Gyro and accel, fast loop 8 kHz, Low-Noise mode, AAF enabled
  * 
  * Architecture multi-banques (BANK 0/1/2/4) — accès via REG_BANK_SEL
  * Config optimisée pour drone cinelifter F380 (stabilité prioritaire)
@@ -10,13 +10,22 @@
 #include "icm42688_driver.h"
 #include "stm32f4xx_ll_spi.h"
 #include "stm32f4xx_ll_utils.h"
+#include "accel_calib.h"
  
 /* ═══════════════════════════════════════════════════════════════════════════
  * INSTANCE PUBLIQUE et BUFFERS DMA
  * ═══════════════════════════════════════════════════════════════════════════ */
 icm42688_data_t icm42688 = {0};
 
-static volatile bool icm_ready = false;   /* true après init complète, prêt pour fast loop 1 kHz */
+static volatile bool icm_ready = false;   /* true après init complète, prêt pour fast loop 8 kHz */
+/* true entre le lancement d'une lecture DMA (CS bas) et son callback de fin (CS haut).
+ * Empêche de relancer une lecture alors que la précédente n'est pas terminée :
+ * sans CS remonté entre les deux, l'ICM verrait UNE seule transaction continue et
+ * renverrait les registres suivants (auto-incrément) → données fausses. */
+static volatile bool dma_busy = false;
+/* Nombre de lectures DMA perdues puis relancées (voir ICM42688_EXTI4_Callback).
+ * Doit rester à 0 : à surveiller au debugger (Live Expressions). */
+volatile uint32_t icm42688_dma_lost = 0;
  
 /*
  * IMPORTANT : buffers DMA DOIVENT être en SRAM (0x20000000+), PAS en CCM RAM.
@@ -144,6 +153,33 @@ static uint8_t spi_read_reg(uint8_t bank, uint8_t reg)
     return val;
 }
 
+/**
+ * @brief  Lecture burst (polling) de n registres consécutifs en BANK 0.
+ * @note   Une seule transaction CS : l'ICM garantit que les octets d'un burst
+ *         viennent du même échantillon. Lire registre par registre (spi_read_reg)
+ *         peut mélanger le MSB d'un échantillon et le LSB du suivant (saut de ±256 LSB).
+ *         Init / calibration uniquement (avant activation du DMA).
+ */
+static void spi_read_burst_b0(uint8_t reg, uint8_t *buf, uint8_t n)
+{
+    icm42688_select_bank(ICM42688_BANK_SEL_0);
+
+    ICM42688_CS_LOW();
+    while (!LL_SPI_IsActiveFlag_TXE(SPI1));
+    LL_SPI_TransmitData8(SPI1, reg | ICM42688_READ_FLAG);
+    while (!LL_SPI_IsActiveFlag_RXNE(SPI1));
+    (void)LL_SPI_ReceiveData8(SPI1);
+
+    for (uint8_t i = 0; i < n; i++) {
+        while (!LL_SPI_IsActiveFlag_TXE(SPI1));
+        LL_SPI_TransmitData8(SPI1, 0x00U);
+        while (!LL_SPI_IsActiveFlag_RXNE(SPI1));
+        buf[i] = LL_SPI_ReceiveData8(SPI1);
+    }
+    while (LL_SPI_IsActiveFlag_BSY(SPI1));
+    ICM42688_CS_HIGH();
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
  * SPs SELF TEST ICM-42688-P
  * ═══════════════════════════════════════════════════════════════════════════ */
@@ -159,15 +195,14 @@ static void st_print_i32(int32_t v)
     print_to_console(buf, n);
 }
 
-/* Moyenne de N échantillons bruts (big-endian, burst via spi_read_reg). */
+/* Moyenne de N échantillons bruts (big-endian, lecture burst cohérente). */
 static void st_average(int32_t g[3], int32_t a[3])
 {
     int32_t sg[3] = {0, 0, 0}, sa[3] = {0, 0, 0};
     uint8_t b[12];
 
     for (uint32_t n = 0; n < ICM42688_ST_NSAMPLES; n++) {
-        for (uint8_t i = 0; i < 12U; i++)
-            b[i] = spi_read_reg(ICM42688_BANK_SEL_0, (uint8_t)(0x1FU + i)); /* ACCEL_DATA_X1.. */
+        spi_read_burst_b0(ICM42688_REG_ACCEL_DATA_X1, b, 12U);   /* ACCEL_DATA_X1..GYRO_DATA_Z0 */
         for (uint8_t k = 0; k < 3U; k++) {
             sa[k] += (int16_t)((b[2U*k] << 8) | b[2U*k + 1U]);
             sg[k] += (int16_t)((b[6U + 2U*k] << 8) | b[7U + 2U*k]);
@@ -261,8 +296,7 @@ static bool cal_measure(float g[3], float a[3])
     bool still = true;
 
     for (uint32_t n = 0; n < CAL_NSAMPLES; n++) {
-        for (uint8_t i = 0; i < 12U; i++)
-            b[i] = spi_read_reg(ICM42688_BANK_SEL_0, (uint8_t)(0x1FU + i));
+        spi_read_burst_b0(ICM42688_REG_ACCEL_DATA_X1, b, 12U);
         for (uint8_t k = 0; k < 3U; k++) {
             int16_t av = (int16_t)((b[2U*k] << 8) | b[2U*k + 1U]);
             int16_t gv = (int16_t)((b[6U + 2U*k] << 8) | b[7U + 2U*k]);
@@ -509,30 +543,32 @@ void ICM42688_Init(void)
     }
     
     /* ══════════════════════════════════════════════════════════════════════
-     * ÉTAPE 5 : Configuration ACCEL_CONFIG0 — ±16g, ODR 1 kHz
+     * ÉTAPE 5 : Configuration ACCEL_CONFIG0 — ±16g, ODR 8 kHz
      * ══════════════════════════════════════════════════════════════════════ */
     /*
      * ACCEL_CONFIG0 (BANK 0, 0x50) :
      * - ACCEL_FS_SEL = 0b000 → ±16g (2048 LSB/g)
-     * - ACCEL_ODR    = 0b0110 → 1 kHz
+     * - ACCEL_ODR    = 0b0011 → 8 kHz (aligné sur le gyro : UI_DRDY et donc la
+     *                  fast loop tombent à 8 kHz sans dépendre de quel ODR pilote le DRDY.
+     *                  Le filtrage accel reste fixé par l'AAF accel ~42 Hz, BANK 2)
      * 
      * Choix ±16g : manoeuvres agressives peuvent atteindre 6-8g,
      * ±16g évite saturation (plus de marge que ±8g du MPU6000).
      */
-    cfg = ICM42688_ACCEL_FS_SEL_16G | ICM42688_ACCEL_ODR_1kHz;
+    cfg = ICM42688_ACCEL_FS_SEL_16G | ICM42688_ACCEL_ODR_8kHz;
     spi_write_reg(ICM42688_BANK_SEL_0, ICM42688_REG_ACCEL_CONFIG0, cfg);
     LL_mDelay(10);
     
     cfg = spi_read_reg(ICM42688_BANK_SEL_0, ICM42688_REG_ACCEL_CONFIG0);
-    if (cfg != (ICM42688_ACCEL_FS_SEL_16G | ICM42688_ACCEL_ODR_1kHz)) {
+    if (cfg != (ICM42688_ACCEL_FS_SEL_16G | ICM42688_ACCEL_ODR_8kHz)) {
         if (debug_init)
             print_to_console("\n\rREG_ACCEL_CONFIG0 MISMATCH", sizeof("\n\rREG_ACCEL_CONFIG0 MISMATCH"));
         while(1);
     }
     else {
         if (debug_init)
-            print_to_console("\n\rICM-42688-P : REG_ACCEL_CONFIG0 OK (+/-16g, 1kHz)", 
-                           sizeof("\n\rICM-42688-P : REG_ACCEL_CONFIG0 OK (+/-16g, 1kHz)"));
+            print_to_console("\n\rICM-42688-P : REG_ACCEL_CONFIG0 OK (+/-16g, 8kHz)", 
+                           sizeof("\n\rICM-42688-P : REG_ACCEL_CONFIG0 OK (+/-16g, 8kHz)"));
     }
     
     /* ══════════════════════════════════════════════════════════════════════
@@ -584,7 +620,7 @@ void ICM42688_Init(void)
                            sizeof("\n\rICM-42688-P : AAF gyro config OK (BANK 1, AAF GYRO enabled)"));
     }
 
-    /* AAF accel (BANK 2) — DÉSACTIVÉ (tout zéro) car UI filter suffit */
+    /* AAF accel (BANK 2) — ACTIVÉ à ~42 Hz : c'est lui qui fixe la bande passante accel */
     spi_write_reg(ICM42688_BANK_SEL_2, ICM42688_REG_ACCEL_CONFIG_STATIC2_B2, 0x02U); // ACCEL_AAF_DIS=0, DELT=1
     LL_mDelay(10);
     spi_write_reg(ICM42688_BANK_SEL_2, ICM42688_REG_ACCEL_CONFIG_STATIC3_B2, 0x01U); // DELTSQR[7:0] = 1
@@ -630,7 +666,7 @@ void ICM42688_Init(void)
     
     /*
      * GYRO_ACCEL_CONFIG0 (BANK 0, 0x52) :
-     * - ACCEL_UI_FILT_BW=6 (~48Hz) | GYRO_UI_FILT_BW=0 => 0x60
+     * - ACCEL_UI_FILT_BW=6 (ODR/20 = 400 Hz @ 8 kHz, l'AAF accel 42 Hz domine) | GYRO_UI_FILT_BW=0 => 0x60
      */
     cfg = ICM42688_ACCEL_UI_FILT_BW_ODR_DIV_20 | ICM42688_GYRO_UI_FILT_BW_0;
     spi_write_reg(ICM42688_BANK_SEL_0, ICM42688_REG_GYRO_ACCEL_CONFIG0, cfg);
@@ -645,8 +681,8 @@ void ICM42688_Init(void)
     }
     else {
         if (debug_init)
-            print_to_console("\n\rICM-42688-P : REG_GYRO_ACCEL_CONFIG0 OK (accel UI filt BW 48Hz, gyro UI filt 0)", 
-                           sizeof("\n\rICM-42688-P : REG_GYRO_ACCEL_CONFIG0 OK (accel UI filt BW 48Hz, gyro UI filt 0)"));
+            print_to_console("\n\rICM-42688-P : REG_GYRO_ACCEL_CONFIG0 OK (accel UI filt ODR/20, gyro UI filt 0)", 
+                           sizeof("\n\rICM-42688-P : REG_GYRO_ACCEL_CONFIG0 OK (accel UI filt ODR/20, gyro UI filt 0)"));
     }
     
     /*
@@ -704,23 +740,25 @@ void ICM42688_Init(void)
     
     /*
      * INT_CONFIG1 (BANK 0, 0x64) :
-     * - INT_ASYNC_RESET = 1 (clear INT status sur n'importe quelle lecture registre)
-     * - INT_TPULSE_DUR  = 0 (100 µs pulse, valeur par défaut)
+     * - INT_ASYNC_RESET       = 0 : OBLIGATOIRE, datasheet §12.6 (défaut = 1,
+     *                               "user should change to 0 for proper INT1/INT2 operation")
+     * - INT_TPULSE_DURATION   = 1 : pulse 8 µs   (requis si ODR >= 4 kHz, gyro à 8 kHz)
+     * - INT_TDEASSERT_DISABLE = 1 : pas de 100 µs de dé-assertion (idem)
      */
-    cfg = ICM42688_INT_CONFIG1_INT_ASYNC_RESET;
+    cfg = ICM42688_INT_CONFIG1_TPULSE_8US | ICM42688_INT_CONFIG1_TDEASSERT_DIS;
     spi_write_reg(ICM42688_BANK_SEL_0, ICM42688_REG_INT_CONFIG1, cfg);
     LL_mDelay(10);
-    
+
     cfg = spi_read_reg(ICM42688_BANK_SEL_0, ICM42688_REG_INT_CONFIG1);
-    if (!(cfg & ICM42688_INT_CONFIG1_INT_ASYNC_RESET)) {
+    if ((cfg & 0x70U) != (ICM42688_INT_CONFIG1_TPULSE_8US | ICM42688_INT_CONFIG1_TDEASSERT_DIS)) {
         if (debug_init)
             print_to_console("\n\rREG_INT_CONFIG1 MISMATCH", sizeof("\n\rREG_INT_CONFIG1 MISMATCH"));
         while(1);
     }
     else {
         if (debug_init)
-            print_to_console("\n\rICM-42688-P : REG_INT_CONFIG1 OK (async reset)", 
-                           sizeof("\n\rICM-42688-P : REG_INT_CONFIG1 OK (async reset)"));
+            print_to_console("\n\rICM-42688-P : REG_INT_CONFIG1 OK (pulse 8us, async reset off)",
+                           sizeof("\n\rICM-42688-P : REG_INT_CONFIG1 OK (pulse 8us, async reset off)"));
     }
     
     /* ══════════════════════════════════════════════════════════════════════
@@ -765,11 +803,11 @@ void ICM42688_Init(void)
      * Burst : 1 adresse + 6 ACCEL + 6 GYRO = 13 octets
      * Adresse départ : ICM42688_REG_ACCEL_DATA_X1 (0x1F) → 12 lectures consécutives jusqu'à GYRO_DATA_Z0
      * 
-     * tx_buf[0] = adresse read (bit7=1) : 0x1D | 0x80 = 0x9D
+     * tx_buf[0] = adresse read (bit7=1) : 0x1F | 0x80 = 0x9F
      * tx_buf[1..12] = dummy 0x00 pour générer clocks SPI
      */
     memset(dma_tx_buf, 0x00, ICM42688_BURST_LEN);
-    dma_tx_buf[0] = ICM42688_REG_ACCEL_DATA_X1 | ICM42688_READ_FLAG;  /* 0x9D */
+    dma_tx_buf[0] = ICM42688_REG_ACCEL_DATA_X1 | ICM42688_READ_FLAG;  /* 0x9F */
     
     /* Préparer DMA en mode Normal (réarmement manuel après chaque transfert) */
     LL_DMA_SetMemoryAddress(ICM42688_DMA, ICM42688_DMA_TX_STREAM, (uint32_t)dma_tx_buf);
@@ -798,18 +836,19 @@ void ICM42688_Init(void)
      * ══════════════════════════════════════════════════════════════════════ */
 
     /*
-     * INT_SOURCE0 (BANK 0, 0x65) :
+     * INT_SOURCE3 (BANK 0, 0x68) — c'est le registre des sources de la broche INT2
+     * (INT_SOURCE0 = celles d'INT1, non câblée ici) :
      * - UI_DRDY_INT2_EN = 1 (router UI Data Ready → INT2 pin)
      * 
-     * UI_DRDY se déclenche à l'ODR le plus lent (accel = 1KHz) configuré quand nouvelles données
-     * gyro+accel disponibles dans les registres.
+     * UI_DRDY à 8 kHz (gyro et accel tous deux à ODR 8 kHz) → fast loop / PID à 8 kHz.
+     * À 8 kHz (période 125 µs), le pulse 8 µs + TDEASSERT_DIS de INT_CONFIG1 sont obligatoires.
      */
-    cfg = ICM42688_INT_SOURCE0_UI_DRDY_INT2_EN;
+    cfg = ICM42688_INT_SOURCE3_UI_DRDY_INT2_EN;
     spi_write_reg(ICM42688_BANK_SEL_0, ICM42688_REG_INT_SOURCE3, cfg);
     LL_mDelay(10);
     
     cfg = spi_read_reg(ICM42688_BANK_SEL_0, ICM42688_REG_INT_SOURCE3);
-    if (!(cfg & ICM42688_INT_SOURCE0_UI_DRDY_INT2_EN)) {
+    if (!(cfg & ICM42688_INT_SOURCE3_UI_DRDY_INT2_EN)) {
         if (debug_init)
             print_to_console("\n\rREG_INT_SOURCE3 MISMATCH", sizeof("\n\rREG_INT_SOURCE3 MISMATCH"));
         while(1);
@@ -821,8 +860,8 @@ void ICM42688_Init(void)
     }
 
     if (debug_init)
-        print_to_console("\n\rICM-42688-P : Init complete, ready for fast loop 1kHz\n\r", 
-                       sizeof("\n\rICM-42688-P : Init complete, ready for fast loop 1kHz\n\r"));
+        print_to_console("\n\rICM-42688-P : Init complete, ready for fast loop 8kHz\n\r", 
+                       sizeof("\n\rICM-42688-P : Init complete, ready for fast loop 8kHz\n\r"));
 
 
     LL_EXTI_ClearFlag_0_31(LL_EXTI_LINE_4);
@@ -869,6 +908,7 @@ void ICM42688_Start_DMA_Read(void)
     LL_DMA_SetDataLength(ICM42688_DMA, ICM42688_DMA_RX_STREAM, ICM42688_BURST_LEN);
     
    /* CS LOW → démarrer transaction SPI */
+    dma_busy = true;
     ICM42688_CS_LOW();
 
     /* Activer streams */
@@ -884,7 +924,7 @@ void ICM42688_DMA_RX_Complete_Callback(void)
 {
     /*
      * Callback Transfer Complete DMA RX (Stream0).
-     * Appelé depuis DMA2_Stream0_IRQHandler quand les 15 octets sont reçus.
+     * Appelé depuis DMA2_Stream0_IRQHandler quand les 13 octets sont reçus (8 kHz).
      * 
      * Séquence :
      * 1. Désactiver DMA requests SPI
@@ -903,7 +943,8 @@ void ICM42688_DMA_RX_Complete_Callback(void)
     
     /* CS HIGH */
     ICM42688_CS_HIGH();
-    
+    dma_busy = false;   /* dma_rx_buf est stable : seul un nouveau DRDY le réécrira */
+
     /* ──────────────────────────────────────────────────────────────────────
      * Parsing données burst (big-endian, MSB first) :
      * 
@@ -927,10 +968,7 @@ void ICM42688_DMA_RX_Complete_Callback(void)
     icm42688.raw_ay = (int16_t)((dma_rx_buf[3] << 8) | dma_rx_buf[4]);
     icm42688.raw_az = (int16_t)((dma_rx_buf[5] << 8) | dma_rx_buf[6]);
     
-    icm42688.ax = (float)icm42688.raw_ax * ICM42688_ACCEL_SCALE_16G_MPS2;
-    icm42688.ay = (float)icm42688.raw_ay * ICM42688_ACCEL_SCALE_16G_MPS2;
-    icm42688.az = (float)icm42688.raw_az * ICM42688_ACCEL_SCALE_16G_MPS2;
-    
+
     /* Gyroscope (big-endian → MSB first) */
     icm42688.raw_gx = (int16_t)((dma_rx_buf[7]  << 8) | dma_rx_buf[8]);
     icm42688.raw_gy = (int16_t)((dma_rx_buf[9]  << 8) | dma_rx_buf[10]);
@@ -939,17 +977,44 @@ void ICM42688_DMA_RX_Complete_Callback(void)
     icm42688.gx = (float)icm42688.raw_gx * ICM42688_GYRO_SCALE_2000DPS_RAD_S;
     icm42688.gy = (float)icm42688.raw_gy * ICM42688_GYRO_SCALE_2000DPS_RAD_S;
     icm42688.gz = (float)icm42688.raw_gz * ICM42688_GYRO_SCALE_2000DPS_RAD_S;
+
+    /* Accel : calibration 6 faces (biais + matrice 3x3) appliquée ici, en m/s².
+     * Sans calibration valide : échelle nominale ±16 g. */
+    {
+        const int16_t ra[3] = { icm42688.raw_ax, icm42688.raw_ay, icm42688.raw_az };
+        const int16_t rg[3] = { icm42688.raw_gx, icm42688.raw_gy, icm42688.raw_gz };
+        float a[3];
+        AccelCal_Feed(ra, rg);      /* no-op hors calibration */
+        AccelCal_Apply(ra, a);
+        icm42688.ax = a[0];
+        icm42688.ay = a[1];
+        icm42688.az = a[2];
+    }
     
     /* ── Conversions pour affichage debug puis print ── */
-    if (debug_imu)
+    /* Print décimé : à 8 kHz un print bloquant à chaque échantillon dans l'ISR
+     * saturerait l'UART et bloquerait les transferts suivants. ~10 Hz. */
+    /* Le print n'a lieu QUE si une calibration accel valide est appliquée
+     * (chargée de la flash au boot, ou venant d'être faite) : sans elle, l'accel
+     * affiché ne serait que l'échelle nominale, peu utile. Pendant une calibration,
+     * accel_calib coupe debug_imu (voir dbg_restore). */
+    static uint16_t dbg_div = 0;
+    if (debug_imu && AccelCal_IsValid() && ++dbg_div >= ICM42688_DEBUG_PRINT_DIV)
     {
+        dbg_div = 0;
+        /* Gyro brut → rad/s × 1000 sans flottant :
+         * 16,4 LSB/(°/s) × 57,2958 (°/rad) = 939,7 LSB/(rad/s)
+         * → rad/s × 1000 = raw × 1000 / 939,7 = raw × 10000 / 9397 */
         int32_t gx = (int32_t)icm42688.raw_gx * 10000 / 9397;
         int32_t gy = (int32_t)icm42688.raw_gy * 10000 / 9397;
         int32_t gz = (int32_t)icm42688.raw_gz * 10000 / 9397;
 
-        int16_t ax = (int16_t)((int32_t)icm42688.raw_ax * 981 / 2048);
-        int16_t ay = (int16_t)((int32_t)icm42688.raw_ay * 981 / 2048);
-        int16_t az = (int16_t)((int32_t)icm42688.raw_az * 981 / 2048);
+        /* Accel : on affiche la valeur CALIBRÉE (icm42688.ax, en m/s²) × 100, et
+         * non le brut. Ça permet de vérifier la calibration : posé à plat, on doit
+         * lire ~0 / 0 / ±9,81. Sans calibration valide, c'est l'échelle nominale. */
+        int16_t ax = (int16_t)(icm42688.ax * 100.0f);
+        int16_t ay = (int16_t)(icm42688.ay * 100.0f);
+        int16_t az = (int16_t)(icm42688.az * 100.0f);
         
         print_to_console("G:", 2);
         print_gyro_rads(gx); UART_Debug_Transmit_Char_LL(' ');
@@ -959,6 +1024,8 @@ void ICM42688_DMA_RX_Complete_Callback(void)
         print_accel_mps2(ax); UART_Debug_Transmit_Char_LL(' ');
         print_accel_mps2(ay); UART_Debug_Transmit_Char_LL(' ');
         print_accel_mps2(az);
+        print_to_console("  lost:", 7);       /* lectures DMA perdues puis relancées, doit rester 0 */
+        st_print_i32((int32_t)icm42688_dma_lost);
         UART_Debug_Transmit_Char_LL('\n'); UART_Debug_Transmit_Char_LL('\r');
     }
     
@@ -972,11 +1039,35 @@ void ICM42688_DMA_RX_Complete_Callback(void)
 /* ═══════════════════════════════════════════════════════════════════════════
  * CALLBACKS INTERRUPTIONS
  * ═══════════════════════════════════════════════════════════════════════════ */
+/*
+ * PRIORITÉS NVIC (réglées dans le .ioc) : EXTI4 et DMA2_Stream0 ont la MÊME
+ * priorité de préemption (1). Ils ne peuvent donc pas s'interrompre l'un l'autre :
+ * un DRDY qui arrive pendant le callback DMA attend sa fin.
+ * Avant, EXTI4 était en 0 et pouvait préempter le callback DMA (2). Avec debug_imu
+ * (print bloquant ~0,5 ms dans le callback), un DRDY relançait alors une lecture
+ * pendant que la précédente n'était pas finie (CS toujours bas) → échantillons
+ * corrompus, y compris ceux fournis à la calibration accel.
+ * Rançon de la même priorité : pendant un print debug, les DRDY sont fusionnés (il
+ * ne reste qu'un seul "pending") → échantillons PERDUS, mais jamais faux. C'est pour
+ * ça qu'accel_calib coupe debug_imu pendant une calibration puis le restaure.
+ * /!\ Si on régénère CubeMX avec d'autres priorités, ce raisonnement tombe.
+ */
 void ICM42688_EXTI4_Callback(void)
 {
     if (!icm_ready) return;
+    /* Garde-fou : une lecture SPI dure ~5 µs et le DRDY revient toutes les 125 µs.
+     * Grâce aux priorités égales, si dma_busy est encore vrai ici, ce n'est pas une
+     * lecture "en cours" mais une lecture PERDUE (erreur DMA, TC jamais reçu).
+     * On ne la saute pas, sinon l'IMU resterait bloquée pour toujours : on remonte CS
+     * pour clore la transaction côté ICM, puis Start_DMA_Read en relance une neuve
+     * (le temps de désactiver les streams laisse CS haut assez longtemps). */
+    if (dma_busy)
+    {
+        ICM42688_CS_HIGH();
+        icm42688_dma_lost++;
+    }
     /*
-     * INT2 rising edge @ 1 kHz (UI_DRDY).
+     * INT2 rising edge @ 8 kHz (UI_DRDY).
      * Déclenche immédiatement la lecture DMA.
      */
     ICM42688_Start_DMA_Read();

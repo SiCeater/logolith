@@ -2,3 +2,17 @@ build
 mx.scratch
 .DS_Store
 !.settings
+
+# Assistant IA (Claude Code) : contexte local et réglages personnels
+CLAUDE.md
+CLAUDE.local.md
+.claude/
+.mcp.json
+
+# Fichiers sensibles (clés, identifiants, variables d'environnement)
+.env
+.env.*
+*.key
+*.pem
+*.p12
+secrets*

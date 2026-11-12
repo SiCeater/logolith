@@ -1,3 +1,12 @@
+/**
+ * led_driver.c
+ * LEDs de la LithCore : rouge (N_R_LED, PB9) et bleue (N_B_LED, PC0).
+ * Le préfixe "N_" des labels CubeMX signifie "actif à l'état bas" : la LED est
+ * câblée entre le 3,3 V et la broche, donc broche à 0 = LED allumée.
+ * D'où l'inversion On → Reset, Off → Set.
+ *
+ * Utilisation actuelle : accel_calib (pendant une calibration) et security (squelette).
+ */
 #include "led_driver.h"
 
 void R_LED_On()

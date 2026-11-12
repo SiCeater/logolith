@@ -1,6 +1,6 @@
 /* icm42688_driver.h
  * Driver LL (Low-Layer) pour ICM-42688-P sur STM32F405
- * SPI1 + DMA2, fast loop 1kHz — GYRO (8KHz) + ACCEL (1KHz)
+ * SPI1 + DMA2, fast loop 8 kHz — GYRO (8 kHz) + ACCEL (8 kHz), DRDY → INT2 @ 8 kHz
  *
  * Câblage :
  *   PA4  → ICM42688_SPI_CS   (GPIO Output)
@@ -99,9 +99,9 @@
 #define ICM42688_REG_FSYNC_CONFIG       0x62U   /* BANK 0 — FSYNC config */
 #define ICM42688_REG_INT_CONFIG0        0x63U   /* BANK 0 — INT clear on read */
 #define ICM42688_REG_INT_CONFIG1        0x64U   /* BANK 0 — INT async reset, pulse mode */
-#define ICM42688_REG_INT_SOURCE0        0x65U   /* BANK 0 — INT source enable (UI_DRDY) */
+#define ICM42688_REG_INT_SOURCE0        0x65U   /* BANK 0 — sources d'interruption routées vers la broche INT1 */
 #define ICM42688_REG_INT_SOURCE1        0x66U   /* BANK 0 — FIFO interrupts */
-#define ICM42688_REG_INT_SOURCE3        0x68U   /* BANK 0 — APEX interrupts */
+#define ICM42688_REG_INT_SOURCE3        0x68U   /* BANK 0 — sources d'interruption routées vers la broche INT2 (utilisée : PC4/EXTI4) */
 #define ICM42688_REG_INT_SOURCE4        0x69U   /* BANK 0 — additional INT sources */
  
 #define ICM42688_REG_FIFO_LOST_PKT0     0x6CU   /* BANK 0 — FIFO lost packets LSB */
@@ -201,13 +201,13 @@
 #define ICM42688_GYRO_FS_SEL_31_25DPS   (0x06U << 5)   /* ±31.25 dps — 1048.6 LSB/dps */
 #define ICM42688_GYRO_FS_SEL_15_625DPS  (0x07U << 5)   /* ±15.625 dps — 2097.2 LSB/dps */
  
-/* Gyro ODR — pour fast loop 1 kHz : ODR = 1 kHz */
+/* Gyro ODR — fast loop (PID rate) à 8 kHz : ODR = 8 kHz */
 #define ICM42688_GYRO_ODR_32kHz         0x01U   /* 32 kHz (DLPF contourne AAF) */
 #define ICM42688_GYRO_ODR_16kHz         0x02U
-#define ICM42688_GYRO_ODR_8kHz          0x03U
+#define ICM42688_GYRO_ODR_8kHz          0x03U   /* ← 8 kHz — FAST LOOP DRONE */
 #define ICM42688_GYRO_ODR_4kHz          0x04U
 #define ICM42688_GYRO_ODR_2kHz          0x05U
-#define ICM42688_GYRO_ODR_1kHz          0x06U   /* ← 1 kHz — FAST LOOP DRONE */
+#define ICM42688_GYRO_ODR_1kHz          0x06U
 #define ICM42688_GYRO_ODR_200Hz         0x07U
 #define ICM42688_GYRO_ODR_100Hz         0x08U
 #define ICM42688_GYRO_ODR_50Hz          0x09U
@@ -225,13 +225,13 @@
 #define ICM42688_ACCEL_FS_SEL_4G        (0x02U << 5)   /* ±4g  — 8192 LSB/g */
 #define ICM42688_ACCEL_FS_SEL_2G        (0x03U << 5)   /* ±2g  — 16384 LSB/g */
  
-/* Accel ODR — pour fast loop 1 kHz : ODR = 1 kHz */
+/* Accel ODR — aligné sur le gyro (8 kHz) pour que UI_DRDY tombe à 8 kHz sans ambiguïté */
 #define ICM42688_ACCEL_ODR_32kHz        0x01U
 #define ICM42688_ACCEL_ODR_16kHz        0x02U
 #define ICM42688_ACCEL_ODR_8kHz         0x03U
 #define ICM42688_ACCEL_ODR_4kHz         0x04U
 #define ICM42688_ACCEL_ODR_2kHz         0x05U
-#define ICM42688_ACCEL_ODR_1kHz         0x06U   /* ← 1 kHz — FAST LOOP DRONE */
+#define ICM42688_ACCEL_ODR_1kHz         0x06U
 #define ICM42688_ACCEL_ODR_200Hz        0x07U
 #define ICM42688_ACCEL_ODR_100Hz        0x08U
 #define ICM42688_ACCEL_ODR_50Hz         0x09U
@@ -254,6 +254,8 @@
 #define ICM42688_ST_ACCEL_MIN_MG    50                 /* idem */
 #define ICM42688_ST_ACCEL_MAX_MG    1200               /* idem */
 
+/* Print d'une chaîne LITTÉRALE uniquement : sizeof donne sa longueur (+1 pour le '\0').
+ * Avec un pointeur char*, sizeof donnerait 4 : ne pas l'utiliser ainsi. */
 #define ST_PRINT(s)  print_to_console(s, sizeof(s))
  
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -290,16 +292,16 @@
  
 /* ACCEL_CONFIG1 — UI Filter BW (post-AAF LPF bandwidth) */
 /*
- * Pour drone cinelifter 1 kHz : BW ~50-100 Hz (filtre HW, avant notch SW)
- * Empirique : BW=6 → ~48 Hz @ ODR 1kHz (config TDK app note)
+ * BW = ODR / diviseur. À ODR 8 kHz, ODR/20 = 400 Hz : le filtrage accel réel
+ * est assuré en amont par l'AAF accel (~42 Hz, BANK 2).
  */
 #define ICM42688_ACCEL_UI_FILT_BW_ODR_DIV_2   (0x00U << 4)  /* ODR/2 (BW max) */
 #define ICM42688_ACCEL_UI_FILT_BW_ODR_DIV_4   (0x01U << 4)  /* ODR/4 */
 #define ICM42688_ACCEL_UI_FILT_BW_ODR_DIV_5   (0x02U << 4)
 #define ICM42688_ACCEL_UI_FILT_BW_ODR_DIV_8   (0x03U << 4)
-#define ICM42688_ACCEL_UI_FILT_BW_ODR_DIV_10  (0x04U << 4)  /* ← ~100 Hz @ ODR 1kHz */
+#define ICM42688_ACCEL_UI_FILT_BW_ODR_DIV_10  (0x04U << 4)  /* ODR/10 (100 Hz @ 1 kHz, 800 Hz @ 8 kHz) */
 #define ICM42688_ACCEL_UI_FILT_BW_ODR_DIV_16  (0x05U << 4)
-#define ICM42688_ACCEL_UI_FILT_BW_ODR_DIV_20  (0x06U << 4)  /* ← ~50 Hz @ ODR 1kHz */
+#define ICM42688_ACCEL_UI_FILT_BW_ODR_DIV_20  (0x06U << 4)  /* ODR/20 (50 Hz @ 1 kHz, 400 Hz @ 8 kHz) — utilisé */
 #define ICM42688_ACCEL_UI_FILT_BW_ODR_DIV_40  (0x07U << 4)
  
 /* INT_CONFIG bits (BANK 0, 0x14) */
@@ -317,13 +319,15 @@
 #define ICM42688_INT_CONFIG_INT1_POLARITY_HIGH  (0x01U << 0)
  
 /* INT_CONFIG1 bits (BANK 0, 0x64) */
-#define ICM42688_INT_CONFIG1_INT_ASYNC_RESET    (1U << 4)  /* Clear INT status on any read */
-#define ICM42688_INT_CONFIG1_INT_TPULSE_DUR     (0x00U << 6)  /* 100 µs pulse */
-#define ICM42688_INT_CONFIG1_INT_TDEASSERT      (0x00U << 5)  /* Deassert disable */
+#define ICM42688_INT_CONFIG1_INT_ASYNC_RESET    (1U << 4)  /* Défaut=1, DOIT être mis à 0 (datasheet §12.6) */
+#define ICM42688_INT_CONFIG1_TDEASSERT_DIS      (1U << 5)  /* Requis si ODR >= 4 kHz */
+#define ICM42688_INT_CONFIG1_TPULSE_8US         (1U << 6)  /* Pulse 8 µs, requis si ODR >= 4 kHz */
  
-/* INT_SOURCE0 bits (BANK 0, 0x65) — UI Data Ready routing */
-#define ICM42688_INT_SOURCE0_UI_DRDY_INT1_EN    (1U << 3)  /* Route UI DRDY → INT1 */
-#define ICM42688_INT_SOURCE0_UI_DRDY_INT2_EN    (1U << 3)  /* Route UI DRDY → INT2 */
+/* Routage de l'interruption "UI Data Ready" (nouvelles données gyro/accel).
+ * Même bit 3, mais dans deux registres différents selon la broche visée :
+ * INT_SOURCE0 (0x65) pour INT1, INT_SOURCE3 (0x68) pour INT2. La LithCore câble INT2. */
+#define ICM42688_INT_SOURCE0_UI_DRDY_INT1_EN    (1U << 3)  /* dans INT_SOURCE0 : UI DRDY → INT1 */
+#define ICM42688_INT_SOURCE3_UI_DRDY_INT2_EN    (1U << 3)  /* dans INT_SOURCE3 : UI DRDY → INT2 */
  
 /* DEVICE_CONFIG bits (BANK 0, 0x11) */
 #define ICM42688_DEVICE_CONFIG_SOFT_RESET_CONFIG (1U << 0)  /* Soft reset */
@@ -362,10 +366,13 @@
  * SPI et GPIO
  * ═══════════════════════════════════════════════════════════════════════════ */
 #define ICM42688_READ_FLAG              0x80U   /* Bit 7 = 1 en lecture SPI */
-#define ICM42688_CS_PORT                GPIOA
-#define ICM42688_CS_PIN                 LL_GPIO_PIN_4
-#define ICM42688_INT_PORT               GPIOC
-#define ICM42688_INT_PIN                LL_GPIO_PIN_4
+/* Broches : on reprend les labels CubeMX (main.h, générés depuis le .ioc) pour
+ * qu'un changement de broche dans CubeMX suive automatiquement ici.
+ *   ICM42688_SPI1_CS = PA4, ICM42688_INT2 = PC4 (EXTI4). */
+#define ICM42688_CS_PORT                ICM42688_SPI1_CS_GPIO_Port
+#define ICM42688_CS_PIN                 ICM42688_SPI1_CS_Pin
+#define ICM42688_INT_PORT               ICM42688_INT2_GPIO_Port   /* non utilisé (EXTI configuré par CubeMX) */
+#define ICM42688_INT_PIN                ICM42688_INT2_Pin
  
 /* DMA */
 #define ICM42688_DMA                    DMA2
@@ -377,9 +384,12 @@
  * Taille burst lecture registres de données (BANK 0) :
  * 1 adresse + 6 ACCEL + 6 GYRO = 13 octets
  * (identique MPU6000, compatible avec architecture existante)
- * Temps SPI @ 10.5 MHz : 13×8 / 10.5e6 ≈ 10.2 µs — OK pour 1 kHz
+ * Temps SPI @ 21 MHz (APB2 84 MHz / 4) : 13×8 / 21e6 ≈ 5 µs — OK pour 8 kHz (période 125 µs)
  */
 #define ICM42688_BURST_LEN              13U
+
+/* Fast loop à 8 kHz : print debug_imu 1 échantillon sur 800 → ~10 Hz */
+#define ICM42688_DEBUG_PRINT_DIV        800U
  
 /* ═══════════════════════════════════════════════════════════════════════════
  * STRUCTURE DE DONNÉES
@@ -422,9 +432,9 @@ extern icm42688_data_t icm42688;
  *         2. Vérification WHO_AM_I (0x47)
  *         3. Config PWR_MGMT0 : Low-Noise mode gyro + accel
  *         4. Config GYRO_CONFIG0 : ±2000 dps, ODR 8 kHz
- *         5. Config ACCEL_CONFIG0 : ±16g, ODR 1 kHz
+ *         5. Config ACCEL_CONFIG0 : ±16g, ODR 8 kHz
  *         6. Config filtres UI (GYRO_CONFIG1, ACCEL_CONFIG1)
- *         7. Config INT2 : push-pull, active-high, pulsed, UI_DRDY routing
+ *         7. Config INT2 : push-pull, active-high, pulsed 8 µs, UI_DRDY routing
  *         8. Lecture test registres pour vérifier config
  * @retval Aucune (bloque en while(1) si échec détection ou config)
  */
@@ -436,7 +446,7 @@ float ICM42688_GetAccelNormRefLsb(void);
 /**
  * @brief  Lance une transaction DMA SPI1 non-bloquante (13 octets burst).
  *         Relance le burst RX en réarmant les streams DMA (mode Normal).
- *         Appelé depuis ICM42688_EXTI4_Callback() (INT2 rising edge @ 1 kHz).
+ *         Appelé depuis ICM42688_EXTI4_Callback() (INT2 rising edge @ 8 kHz).
  */
 void ICM42688_Start_DMA_Read(void);
  
@@ -448,7 +458,7 @@ void ICM42688_Start_DMA_Read(void);
 void ICM42688_DMA_RX_Complete_Callback(void);
  
 /**
- * @brief  Callback EXTI4 (flanc montant INT2 de l'ICM-42688-P @ 1kHz).
+ * @brief  Callback EXTI4 (flanc montant INT2 de l'ICM-42688-P @ 8 kHz).
  *         À appeler depuis EXTI4_IRQHandler dans stm32f4xx_it.c.
  */
 void ICM42688_EXTI4_Callback(void);

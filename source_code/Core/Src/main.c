@@ -34,6 +34,8 @@
 #include "security.h"
 #include "debug.h"
 #include "icm42688_driver.h"
+#include "config.h"
+#include "accel_calib.h"
 
 /* USER CODE END Includes */
 
@@ -76,7 +78,7 @@ void SystemClock_Config(void);
 int main(void)
 {
 
-  /* USER CODE BEGIN 1 */ 
+  /* USER CODE BEGIN 1 */
   debug_init =1;
   debug_rc =1;
   debug_imu =1;
@@ -103,6 +105,15 @@ int main(void)
 
   /* USER CODE BEGIN SysInit */
 
+  /* LL_Init1msTick() (dans SystemClock_Config) démarre le SysTick à 1 ms mais SANS
+   * son interruption (CTRL = CLKSOURCE | ENABLE, pas de TICKINT) : en LL pur, le
+   * SysTick ne sert qu'au polling de LL_mDelay. Sans cette ligne, SysTick_Handler
+   * ne tourne jamais → ms_counter reste à 0 → get_ms() = 0 → la slow loop, le
+   * failsafe RC, la resynchro CRSF et la calibration accel sont tous figés.
+   * Compatible avec LL_mDelay : il teste COUNTFLAG, que l'ISR ne touche pas.
+   * Priorité 15 (la plus basse), réglée plus haut par CubeMX. */
+  LL_SYSTICK_EnableIT();
+
   /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
@@ -117,15 +128,26 @@ int main(void)
   MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
 
-  R_LED_On();
-  B_LED_On();
-  
-  // ESC_Init();
-  // ESC_Test();
-  
-  ICM42688_Init();
+  /* ── Séquence de boot applicative (ordre important) ──────────────────────
+   * 1. Remote_Init     : démarre la réception CRSF (DMA + IRQ IDLE USART2). Non bloquant :
+   *                      ne fait PAS attendre la radio, les trames arrivent ensuite en tâche de fond.
+   * 2. Config_Load     : lit la config sauvegardée (flash secteur 11) → g_config.
+   * 3. ICM42688_Init   : config IMU + self-test + calibration GYRO automatique (BLOQUANT
+   *                      quelques secondes, drone IMMOBILE requis), puis lance la lecture DMA 8 kHz.
+   * 4. AccelCal_Init   : applique la calibration ACCEL sauvegardée (ne lance aucune calibration).
+   * 5. Boucle          : slow loop ~500 Hz (RC + calibration accel déclenchable par SA+SD).
+   *
+   * ESC (pas encore appelés) : ESC_Init() envoie seulement l'impulsion d'arrêt (sans risque).
+   * ESC_Calibrate() et ESC_Test() font tourner les moteurs : HÉLICES DÉMONTÉES, jamais au boot. */
 
-  // Remote_Init();
+  Remote_Init();
+
+  Config_Load();          /* config persistante (flash secteur 11) → g_config */
+
+  ICM42688_Init();
+  AccelCal_Init();        /* applique la calibration accel sauvegardée, s'il y en a une */
+
+  uint32_t slow_last_ms = get_ms();
 
   /* USER CODE END 2 */
 
@@ -136,6 +158,16 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+
+    /* Slow loop provisoire ~500 Hz (RC + calibration). La fast loop / PID tournera
+     * à 8 kHz, cadencée par le DRDY de l'ICM. */
+    uint32_t now_ms = get_ms();
+    if (now_ms - slow_last_ms >= 2U) {
+      float dt = (float)(now_ms - slow_last_ms) * 1e-3f;
+      slow_last_ms = now_ms;
+      Remote_Process(dt);
+      AccelCal_Process();
+    }
   }
   /* USER CODE END 3 */
 }

@@ -1,3 +1,19 @@
+/**
+ * debug.c
+ * Console de debug sur UART5 (on n'utilise que le TX, broche DEBUG_TX / PC12),
+ * 921600 bauds (CubeMX, usart.c). Régler le moniteur série à 921600.
+ *
+ * Fonctionnement : envoi en "polling", octet par octet, en attendant TXE (registre
+ * de transmission vide). Simple et fiable, mais BLOQUANT : à 921600 bauds, un
+ * caractère prend ~11 µs, soit ~0,5 ms pour une ligne de 50 caractères. Appelé depuis une
+ * ISR (debug_imu), ça décale toutes les autres interruptions de même
+ * priorité ou moins prioritaires. Exemple : une ligne IMU (~0,5 ms) représente 4
+ * périodes de la boucle 8 kHz, d'où les prints IMU décimés à ~10 Hz.
+ *
+ * Pas de printf : avec newlib-nano, printf ne gère pas les flottants sans l'option
+ * de link -u _printf_float (+~10 Ko). Les valeurs sont donc converties en
+ * entiers mis à l'échelle (×10, ×100, ×1000) puis affichées en ASCII à la main.
+ */
 #include "debug.h"
 #include "stm32f405xx.h"
 #include <stdint.h>
@@ -8,6 +24,8 @@ void UART_Debug_Transmit_Char_LL(uint8_t c)
     LL_USART_TransmitData8(UART5, c);
 }
 
+/* Envoie `size` octets. Attend TC (fin de transmission) à la fin : au retour, le
+ * dernier octet est réellement sorti sur la broche. */
 void UART_Debug_Transmit_Buffer_LL(uint8_t *data, uint16_t size)
 {
   for (uint16_t i = 0; i < size; i++)
@@ -72,7 +90,8 @@ void print_gyro_data(int16_t dps_x10)
 /*
  * Même mécanique que print_gyro_data.
  * Entrée : g×10 en int16  (ex: 10 → "1.0g",  -24 → "-2.4g")
- * Plage : ±8g → ±80 en entrée → max "-8.0" = 5 chars + 'g' = 6 chars
+ * Plage : ±16g → ±160 en entrée → max "-16.0g" = 6 chars, pile la taille de buf
+ * (pas de '\0' : on envoie len caractères, ce n'est pas une chaîne C)
  */
 void print_accel_data(int16_t g_x10)
 {
@@ -112,7 +131,8 @@ void print_accel_data(int16_t g_x10)
 }
 
 /* ─── Gyro en rad/s, 3 décimales ───────────────────────────────────────── */
-/* Entrée : int32_t car max ±34906 déborde int16 (±32767) */
+/* Entrée : rad/s × 1000. int32_t car ±2000 dps = ±34,906 rad/s → ±34906, qui
+ * déborde un int16 (±32767). Appelant : icm42688_driver.c (debug_imu). */
 void print_gyro_rads(int32_t rad_x1000)
 {
     char    buf[9];   /* "-34.906" = 7 chars max */
@@ -150,7 +170,7 @@ void print_gyro_rads(int32_t rad_x1000)
 }
 
 /* ─── Accel en m/s², 2 décimales ───────────────────────────────────────── */
-/* Entrée : int16_t, max ±7848 pour ±8g */
+/* Entrée : m/s² × 100. ±16 g = ±156,9 m/s² → ±15691, tient dans un int16. */
 void print_accel_mps2(int16_t mps2_x100)
 {
     char    buf[8];   /* "-78.48" = 6 chars max */
@@ -300,6 +320,9 @@ void print_yaw_deg(float yaw_rad)
         UART_Debug_Transmit_Char_LL((uint8_t)buf[i]);
 }
 
+/* Point d'entrée générique pour les messages texte.
+ * NB : beaucoup d'appelants passent sizeof("...") comme taille, ce qui envoie
+ * aussi le '\0' final. C'est invisible dans la plupart des terminaux série. */
 void print_to_console(char *buffer, uint16_t buffer_size)
 {
   UART_Debug_Transmit_Buffer_LL((uint8_t *)buffer, buffer_size);

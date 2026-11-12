@@ -81,11 +81,11 @@ The RC transmitter is also custom (STM32F411 + ExpressLRS module) and lives in i
 ```mermaid
 flowchart LR
     RX["ELRS receiver<br/>CRSF 420 kbaud"] -->|"UART DMA + IDLE"| RCP["RC processing<br/>deadband · expo · LPF"]
-    ICM["ICM-42688-P<br/>SPI1 + DMA2"] -->|"UI_DRDY @ 1 kHz"| GYR["Gyro chain<br/>offset · notch · PT2"]
+    ICM["ICM-42688-P<br/>SPI1 + DMA2"] -->|"UI_DRDY @ 8 kHz"| GYR["Gyro chain<br/>offset · notch · PT2"]
     GYR --> AHRS["Gated Mahony<br/>attitude estimate"]
     RCP -->|"attitude setpoint"| ANG["Angle loop<br/>quaternion error"]
     AHRS --> ANG
-    ANG -->|"rate setpoint"| RATE["Rate PID @ 1 kHz<br/>D on measurement"]
+    ANG -->|"rate setpoint"| RATE["Rate PID @ 8 kHz<br/>D on measurement"]
     GYR --> RATE
     RATE --> MIX["Mixer<br/>Quad-X / X8 + desaturation"]
     MIX --> ESC["Motor output<br/>OneShot125 / DShot"]
@@ -93,7 +93,7 @@ flowchart LR
 
 A classic cascade:
 
-- **Inner loop — rate PID at 1 kHz.** Triggered by the IMU data-ready interrupt, so the loop is hardware-timed by the sensor rather than by a free-running timer. D term computed on the measurement only (no derivative kick), with its own low-pass filter. Conditional-clamping anti-windup.
+- **Inner loop — rate PID at 8 kHz.** Triggered by the IMU data-ready interrupt, so the loop is hardware-timed by the sensor rather than by a free-running timer. D term computed on the measurement only (no derivative kick), with its own low-pass filter. Conditional-clamping anti-windup.
 - **Outer loop — angle.** The attitude error is computed in SO(3), not by subtracting Euler angles: `q_err = q_current⁻¹ ⊗ q_setpoint`, giving the error in the body frame. The small-angle vector part (`2·q_err.xyz`) feeds a P(I) controller that outputs rate setpoints.
 - **Mixer.** Quad-X matrix, then desaturation by renormalization so a saturated motor does not create an unwanted torque. X8 coaxial mixing is planned.
 
@@ -122,7 +122,7 @@ raw gyro → boot offset (in-sensor) → biquad notch(es) → PT2 low-pass → r
 Bare-metal, interrupt-driven, no RTOS. The CPU budget on a 168 MHz Cortex-M4F is a few percent, so prioritized interrupts are enough.
 
 - **Sensor → DMA → callback.** A data-ready EXTI starts a DMA burst; the DMA transfer-complete interrupt parses the data and runs the loop. Nothing in the fast path polls.
-- **NVIC priorities** follow time-criticality: IMU EXTI and its DMA first, then RC link, then slow sensors, telemetry and debug.
+- **NVIC priorities** follow time-criticality: IMU EXTI and its DMA first (both at the same preemption level, so a new data-ready can never restart a read whose completion handler is still running), then RC link, then slow sensors, telemetry and debug. SysTick (1 ms timebase) sits at the lowest priority.
 - **Shared data between loops** (e.g. the 3-float rate setpoint written by the outer loop and read by the inner loop) is exchanged through a double buffer or a short critical section, since a multi-word copy is not atomic on Cortex-M4.
 
 ---
@@ -137,6 +137,9 @@ These rules come from bring-up issues that actually happened on this project.
 4. **Do not trust eye-closed generated LL init.** CubeMX does not enable the DMA TC interrupt or the SPI peripheral itself; these are done explicitly in the drivers.
 5. **The fast-loop sensor owns its bus.** The IMU is alone on SPI1; slower sensors go elsewhere (the barometer was moved to I2C for this reason).
 6. **Verify the silicon.** A counterfeit ICM-42688-P (wrong WHO_AM_I, flat single-bank register map) was found and replaced. Critical ICs are sourced from authorized distributors.
+7. **`LL_Init1msTick()` does not enable the SysTick interrupt.** It only starts the counter for `LL_mDelay()` polling. Without an explicit `LL_SYSTICK_EnableIT()`, the millisecond counter stayed at 0 and every time-based feature (slow loop, RC failsafe, calibration timeouts) silently never ran.
+8. **Never output a dangerous command at boot.** ESC range calibration (full throttle) is a separate, explicit bench procedure; init only outputs the stop pulse, and every motor command defaults to 0.
+9. **No blocking debug output in interrupts unless decimated.** Console prints are blocking (~11 µs per character); IMU prints are decimated to ~10 Hz and RC prints run from the main loop, and both are paused during calibrations.
 
 ---
 
@@ -147,17 +150,19 @@ Legend: ✅ done and verified on hardware · 🔧 in progress · 📋 planned
 | Module | Status | Notes |
 | --- | --- | --- |
 | System clock, debug/flash by STLink V3, USB DFU Flashing| ✅ | 168 MHz from 8 MHz HSE |
-| ICM-42688-P driver | ✅ | Multi-bank register map (banks 0/1/2/4), low-noise mode, gyro ±2000 dps @ 8 kHz ODR, accel ±16 g @ 1 kHz, AAF configured, UI_DRDY on INT2, 13-byte DMA burst |
+| ICM-42688-P driver | ✅ | Multi-bank register map (banks 0/1/2/4), low-noise mode, gyro ±2000 dps and accel ±16 g both @ 8 kHz ODR, AAF configured, UI_DRDY on INT2 @ 8 kHz, 13-byte DMA burst. A lost DMA transfer is detected and restarted |
 | ICM-42688-P self-test | ✅ | MEMS self-test passes on gyro and accel |
 | Boot gyro calibration | ✅ | Bias measured at rest and written to the sensor's `OFFSET_USER` registers (~0.6 s, board still) |
-| Accel calibration | 🔧 | An accelerometer calibration (6 poses calibration) is needed on every new mounted chassis to suppress mounting related physical offsets and in sensors naturals offsets
+| Accel calibration | 🔧 | An accelerometer calibration (6 poses calibration) is needed on every new mounted chassis to suppress mounting related physical offsets and in sensors naturals offsets. Implemented, bench test pending: started from the radio (SA+SD held 2 s, throttle low), faces detected automatically in any order, bias + full 3×3 scale/cross-axis matrix, sanity checks, applied at 8 kHz in the DMA callback |
+| Persistent config storage | 🔧 | Implemented, bench test pending: flash sector 11 reserved (the link fails if the firmware grows into it), append-only log with CRC32, survives reflashing (except a full-chip erase) |
+| 1 ms timebase (SysTick) | 🔧 | SysTick interrupt now enabled (see design rule 7), to be confirmed on hardware |
 | ELRS / CRSF receiver driver | ✅ | DMA circular buffer + IDLE interrupt, 3-state parser, CRC8 (DVB-S2), RC channels / link statistics / device frames, arming gated on link quality |
 | Gyro bias tracking at rest | 🔧 | Catches the post-power-up bias drift (~0.2–0.3 dps) left after the boot calibration |
 | Gated Mahony | 🔧 | |
 | Software notch + PT2 / PT1 filters | 🔧 | Notch placement for 640 KV / tri-blade |
 | Rate PID + Quad-X mixer | 📋 | Target: stable ACRO flight before ANGLE |
-| Motor output (OneShot125, then DShot) | OneShot125 ✅, DShot 🔧 | |
-| Arming, failsafe | 📋 | |
+| Motor output (OneShot125, then DShot) | OneShot125 ✅, DShot 🔧 | Init outputs the stop pulse only; ESC range calibration is a separate explicit procedure. Board pads M1..M8 mapped to TIM8 / TIM1 / TIM3 in the CubeMX config |
+| Arming, failsafe | 🔧 | Link-timeout detection cuts throttle and disarms; failsafe routine, arming lockouts and arm-switch cycling still to do |
 | Angle loop (quaternion error) | 📋 | |
 | Barometer + altitude hold | 📋 | Complementary filter baro / vertical acceleration |
 | Optical flow position hold | 📋 | PMW3901 + VL53L1X |
@@ -188,8 +193,26 @@ Accelerometer offsets are deliberately **not** calibrated at boot: doing so woul
 
 ## Roadmap
 
+### Immediate next steps
+
+1. **Bench-test the accelerometer calibration:** run the 6 faces, check that the result is saved and reloaded after a reboot (the IMU debug print should read ~0 / 0 / ±9.81 m/s² when flat).
+2. **Choose a latching arm switch** (SF) and move `armed` off CH5: SA is a momentary push button on the radio.
+3. **Security module:** arming lockouts, arm-switch cycling after failsafe or calibration, real failsafe routine.
+4. **Motor mapping test** with `ESC_Test()` (props off): motor position and spin direction for each pad.
+5. Then Phase 2 below.
+
+### Known TODOs
+
+- **Re-arm after failsafe:** when the RC link comes back, `armed` follows the switch immediately, so the drone re-arms if the arm switch was left on. Arming must require the switch to be cycled first.
+- **Arming lockouts:** refuse arming while an accelerometer calibration is running (`AccelCal_InProgress()`), when no valid accelerometer calibration is loaded (`AccelCal_IsValid()`), and right after a calibration until the arm switch has been cycled.
+- **Motor mapping:** pad ↔ timer channel is confirmed (M1..M4 = PC6..PC9 = TIM8 CH1..CH4, M5..M7 = PA8..PA10 = TIM1, M8 = PB1 = TIM3); the motor position on each pad and the spin directions are still to check (see `esc_driver.c`).
+- **ESC update rate:** OneShot125 runs at 1 kHz; raise it (up to ~3.9 kHz) or move to DShot once the 8 kHz rate loop is in place.
+- **ESC_M8 timer scale:** TIM3 is clocked from APB1, so its timer runs at 12 MHz instead of 24 MHz and its pulse values are half those of M1..M7.
+
+### Phases
+
 **Phase 1 — Sensing and link** *(mostly done)*
-ICM-42688-P driver, boot calibration, CRSF receiver. Remaining: bias tracking at rest.
+ICM-42688-P driver, boot calibration, CRSF receiver, accelerometer 6-face calibration with flash storage (bench test pending). Remaining: bias tracking at rest.
 
 **Phase 2 — ACRO flight**
 Software notch + PT2 + D-term filtering, rate PID, Quad-X mixer with desaturation, motor output, arming and failsafe. The drone must be stable in ACRO before anything else.
@@ -233,7 +256,7 @@ cmake --build --preset Debug
 ./flash_DFU.sh
 ```
 
-Debug outputs are enabled able/disabled able by peripherals in the main (register readback, sensor logs) and are printed on the debug UART.
+Debug outputs are enabled / disabled per subsystem with the `debug_*` flags in `global.c` (register readback, IMU data ~10 Hz, RC link quality and channels at 5 Hz, warnings) and are printed on the debug UART (UART5, 921600 baud).
 
 ---
 
