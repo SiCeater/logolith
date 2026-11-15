@@ -1,6 +1,7 @@
 #include "FreeRTOS.h"
 #include "SEGGER_RTT.h"
 #include "clock.h"
+#include "gps.h"
 #include "log.h"
 #include "stm32f4xx_ll_bus.h"
 #include "stm32f4xx_ll_gpio.h"
@@ -14,10 +15,13 @@
 
 #define BLINK_PERIOD_MS 420U
 #define BLINK_STACK     configMINIMAL_STACK_SIZE
+#define GPS_STACK       configMINIMAL_STACK_SIZE
 #define BLINK_PRIORITY  (tskIDLE_PRIORITY + 1)
 
 static StackType_t blink_stack[BLINK_STACK];
 static StaticTask_t blink_tcb;
+static StackType_t gps_stack[GPS_STACK];
+static StaticTask_t gps_tcb;
 
 static void leds_init(void)
 {
@@ -49,10 +53,28 @@ static void blink_task(void *arg)
     (void)arg;
     TickType_t wake = xTaskGetTickCount();
 
+    log_info(LOG_NORMAL, "Toggling LED!");
+
     for (;;) {
         LL_GPIO_TogglePin(LED_BLUE_PORT, LED_BLUE_PIN);
         xTaskDelayUntil(&wake, pdMS_TO_TICKS(BLINK_PERIOD_MS));
-        log_info(LOG_NORMAL, "LED toggled!");
+    }
+}
+
+static void gps_task(void *arg)
+{
+    (void)arg;
+    UART4_LL_IT_INIT();
+    log_info(LOG_NORMAL, "GPS task started");
+
+    for (;;) {
+        if (UART4_Available()) {
+            uint8_t data = UART4_Read();
+            // Process the received data as needed
+            log_info(LOG_NORMAL, "Received byte from GPS");
+            SEGGER_RTT_printf(0, "Received byte: %02X\n", data);
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
 
@@ -67,9 +89,10 @@ int main(void)
         }
     }
 
-    SEGGER_RTT_WriteString(0, "Firmware démarré\r\n"); // 0 = canal de sortie par défaut SEGGER
+    log_boot();
 
     xTaskCreateStatic(blink_task, "blink", BLINK_STACK, NULL, BLINK_PRIORITY, blink_stack, &blink_tcb);
+    xTaskCreateStatic(gps_task, "gps", GPS_STACK, NULL, BLINK_PRIORITY, gps_stack, &gps_tcb);
     vTaskStartScheduler();
 
     for (;;) { // atteint seulement si le noyau n'a pas pu démarrer

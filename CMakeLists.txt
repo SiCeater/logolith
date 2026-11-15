@@ -36,6 +36,7 @@ add_executable(logolith
     src/main.c
     src/clock.c
     src/log.c
+    src/gps.c
     ${cmsis_device_f4_SOURCE_DIR}/Source/Templates/system_stm32f4xx.c
     ${cmsis_device_f4_SOURCE_DIR}/Source/Templates/gcc/startup_stm32f405xx.s
 )
