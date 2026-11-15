@@ -47,6 +47,9 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
+/* Période de la slow loop provisoire (RC, armement, calibration accel) : 2 ms → 500 Hz */
+#define SLOW_LOOP_PERIOD_MS   2U
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -68,6 +71,20 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+/* Cadenceur basé sur get_ms() : renvoie true quand period_ms se sont écoulées
+ * depuis le dernier passage, et met dans *dt_s le temps RÉELLEMENT écoulé (en
+ * secondes : plus que period_ms si la boucle a pris du retard, ex. print debug).
+ * La soustraction non signée reste juste au débordement de ms_counter (~49 jours). */
+static bool period_elapsed(uint32_t *last_ms, uint32_t period_ms, float *dt_s)
+{
+  uint32_t now     = get_ms();
+  uint32_t elapsed = now - *last_ms;
+  if (elapsed < period_ms) return false;
+  *last_ms = now;
+  *dt_s    = (float)elapsed * 1e-3f;
+  return true;
+}
 
 /* USER CODE END 0 */
 
@@ -132,7 +149,8 @@ int main(void)
    * 3. ICM42688_Init   : config IMU + self-test + calibration GYRO automatique (BLOQUANT
    *                      quelques secondes, drone IMMOBILE requis), puis lance la lecture DMA 8 kHz.
    * 4. AccelCal_Init   : applique la calibration ACCEL sauvegardée (ne lance aucune calibration).
-   * 5. Boucle          : slow loop ~500 Hz (RC + calibration accel déclenchable par SA+SD).
+   * 5. Boucle          : slow loop ~500 Hz (RC, armement sur SF, calibration accel par SA+SD),
+   *                      puis print debug IMU dans le temps libre.
    *
    * ESC (pas encore appelés) : ESC_Init() envoie seulement l'impulsion d'arrêt (sans risque).
    * ESC_Calibrate() et ESC_Test() font tourner les moteurs : HÉLICES DÉMONTÉES, jamais au boot. */
@@ -156,15 +174,17 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 
-    /* Slow loop provisoire ~500 Hz (RC + calibration). La fast loop / PID tournera
-     * à 8 kHz, cadencée par le DRDY de l'ICM. */
-    uint32_t now_ms = get_ms();
-    if (now_ms - slow_last_ms >= 2U) {
-      float dt = (float)(now_ms - slow_last_ms) * 1e-3f;
-      slow_last_ms = now_ms;
-      Remote_Process(dt);
-      AccelCal_Process();
+    /* Slow loop provisoire ~500 Hz. La fast loop / PID tournera à 8 kHz dans
+     * l'ISR, cadencée par le DRDY de l'ICM. */
+    float slow_dt;
+    if (period_elapsed(&slow_last_ms, SLOW_LOOP_PERIOD_MS, &slow_dt)) {
+      Remote_Process(slow_dt);   /* RC : canaux, axes, failsafe */
+      Security_Process();        /* armement / désarmement, APRÈS Remote_Process */
+      AccelCal_Process();        /* calibration accel (SA+SD 2 s) */
     }
+
+    /* Temps libre : print debug IMU (bloquant mais préemptable par toutes les IRQ) */
+    if (debug_imu) ICM42688_Debug_Process();
   }
   /* USER CODE END 3 */
 }

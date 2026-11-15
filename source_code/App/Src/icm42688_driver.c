@@ -26,6 +26,16 @@ static volatile bool dma_busy = false;
 /* Nombre de lectures DMA perdues puis relancées (voir ICM42688_EXTI4_Callback).
  * Doit rester à 0 : à surveiller au debugger (Live Expressions). */
 volatile uint32_t icm42688_dma_lost = 0;
+
+/* Instantané pour le debug IMU : écrit par l'ISR DMA, lu par la boucle
+ * principale (ICM42688_Debug_Process). dbg_snap_ready sert de poignée de main. */
+typedef struct {
+    int16_t  raw_gx, raw_gy, raw_gz;
+    float    ax, ay, az;
+    uint32_t lost;
+} icm_dbg_snap_t;
+static icm_dbg_snap_t dbg_snap;
+static volatile bool  dbg_snap_ready = false;
  
 /*
  * IMPORTANT : buffers DMA DOIVENT être en SRAM (0x20000000+), PAS en CCM RAM.
@@ -991,10 +1001,14 @@ void ICM42688_DMA_RX_Complete_Callback(void)
         icm42688.az = a[2];
     }
     
-    /* ── Conversions pour affichage debug puis print ── */
-    /* Print décimé : à 8 kHz un print bloquant à chaque échantillon dans l'ISR
-     * saturerait l'UART et bloquerait les transferts suivants. ~10 Hz. */
-    /* Le print n'a lieu QUE si une calibration accel valide est appliquée
+    /* ── Debug IMU : instantané seulement, le print se fait hors ISR ──
+     * On ne print PLUS ici : un print bloquant (~0,55 ms) dans cette ISR de
+     * priorité 1 faisait perdre ~4 DRDY à chaque ligne. L'ISR se contente de
+     * copier les valeurs dans dbg_snap (quelques dizaines de ns), 1 échantillon
+     * sur ICM42688_DEBUG_PRINT_DIV (~2 Hz) ; ICM42688_Debug_Process(), appelé
+     * depuis la boucle principale, formate et envoie la ligne pendant le temps
+     * libre, interruptible par toutes les IRQ.
+     * Le print n'a lieu QUE si une calibration accel valide est appliquée
      * (chargée de la flash au boot, ou venant d'être faite) : sans elle, l'accel
      * affiché ne serait que l'échelle nominale, peu utile. Pendant une calibration,
      * accel_calib coupe debug_imu (voir dbg_restore). */
@@ -1002,33 +1016,21 @@ void ICM42688_DMA_RX_Complete_Callback(void)
     if (debug_imu && AccelCal_IsValid() && ++dbg_div >= ICM42688_DEBUG_PRINT_DIV)
     {
         dbg_div = 0;
-        /* Gyro brut → rad/s × 1000 sans flottant :
-         * 16,4 LSB/(°/s) × 57,2958 (°/rad) = 939,7 LSB/(rad/s)
-         * → rad/s × 1000 = raw × 1000 / 939,7 = raw × 10000 / 9397 */
-        int32_t gx = (int32_t)icm42688.raw_gx * 10000 / 9397;
-        int32_t gy = (int32_t)icm42688.raw_gy * 10000 / 9397;
-        int32_t gz = (int32_t)icm42688.raw_gz * 10000 / 9397;
-
-        /* Accel : on affiche la valeur CALIBRÉE (icm42688.ax, en m/s²) × 100, et
-         * non le brut. Ça permet de vérifier la calibration : posé à plat, on doit
-         * lire ~0 / 0 / ±9,81. Sans calibration valide, c'est l'échelle nominale. */
-        int16_t ax = (int16_t)(icm42688.ax * 100.0f);
-        int16_t ay = (int16_t)(icm42688.ay * 100.0f);
-        int16_t az = (int16_t)(icm42688.az * 100.0f);
-        
-        print_to_console("G:", 2);
-        print_gyro_rads(gx); UART_Debug_Transmit_Char_LL(' ');
-        print_gyro_rads(gy); UART_Debug_Transmit_Char_LL(' ');
-        print_gyro_rads(gz);
-        print_to_console("  A:", 4);
-        print_accel_mps2(ax); UART_Debug_Transmit_Char_LL(' ');
-        print_accel_mps2(ay); UART_Debug_Transmit_Char_LL(' ');
-        print_accel_mps2(az);
-        print_to_console("  lost:", 7);       /* lectures DMA perdues puis relancées, doit rester 0 */
-        st_print_i32((int32_t)icm42688_dma_lost);
-        UART_Debug_Transmit_Char_LL('\n'); UART_Debug_Transmit_Char_LL('\r');
+        /* Poignée de main sans couper les IRQ : l'ISR n'écrit que si la boucle
+         * principale a fini de lire (dbg_snap_ready == false), et lève le flag
+         * APRÈS avoir tout écrit. Si l'instantané précédent n'a pas encore été
+         * consommé, on saute simplement celui-ci. */
+        if (!dbg_snap_ready) {
+            dbg_snap.raw_gx = icm42688.raw_gx;
+            dbg_snap.raw_gy = icm42688.raw_gy;
+            dbg_snap.raw_gz = icm42688.raw_gz;
+            dbg_snap.ax     = icm42688.ax;
+            dbg_snap.ay     = icm42688.ay;
+            dbg_snap.az     = icm42688.az;
+            dbg_snap.lost   = icm42688_dma_lost;
+            dbg_snap_ready  = true;
+        }
     }
-    
 
     /* ──────────────────────────────────────────────────────────────────────
      * Flag data_ready → la fast loop peut consommer gx/gy/gz
@@ -1036,6 +1038,48 @@ void ICM42688_DMA_RX_Complete_Callback(void)
     icm42688.data_ready = true;
 }
  
+/* ─── Print debug IMU, côté boucle principale ──────────────────────────────
+ * Consomme l'instantané posé par ICM42688_DMA_RX_Complete_Callback. Le print
+ * reste bloquant (~0,55 ms, polling UART), mais il tourne en mode thread : les
+ * IRQ (DRDY, DMA SPI, CRSF…) le préemptent normalement, il n'utilise donc que le
+ * temps CPU que personne d'autre ne réclame. Seul effet : il retarde d'autant la
+ * slow loop qui le suit (dt est mesuré, donc sans conséquence).
+ * /!\ Si un jour la fast loop / PID tourne dans la boucle principale (au lieu
+ * de l'ISR), ce print la bloquerait : à revoir à ce moment-là. */
+void ICM42688_Debug_Process(void)
+{
+    if (!dbg_snap_ready) return;
+
+    /* Copie locale puis libération immédiate du tampon pour l'ISR */
+    icm_dbg_snap_t s = dbg_snap;
+    dbg_snap_ready = false;
+
+    /* Gyro brut → rad/s × 1000 sans flottant :
+     * 16,4 LSB/(°/s) × 57,2958 (°/rad) = 939,7 LSB/(rad/s)
+     * → rad/s × 1000 = raw × 1000 / 939,7 = raw × 10000 / 9397 */
+    int32_t gx = (int32_t)s.raw_gx * 10000 / 9397;
+    int32_t gy = (int32_t)s.raw_gy * 10000 / 9397;
+    int32_t gz = (int32_t)s.raw_gz * 10000 / 9397;
+
+    /* Accel : valeur CALIBRÉE (m/s²) × 100, et non le brut. Ça permet de vérifier
+     * la calibration : posé à plat, on doit lire ~0 / 0 / ±9,81. */
+    int16_t ax = (int16_t)(s.ax * 100.0f);
+    int16_t ay = (int16_t)(s.ay * 100.0f);
+    int16_t az = (int16_t)(s.az * 100.0f);
+
+    print_to_console("G:", 2);
+    print_gyro_rads(gx); UART_Debug_Transmit_Char_LL(' ');
+    print_gyro_rads(gy); UART_Debug_Transmit_Char_LL(' ');
+    print_gyro_rads(gz);
+    print_to_console("  A:", 4);
+    print_accel_mps2(ax); UART_Debug_Transmit_Char_LL(' ');
+    print_accel_mps2(ay); UART_Debug_Transmit_Char_LL(' ');
+    print_accel_mps2(az);
+    print_to_console("  lost:", 7);       /* lectures DMA perdues puis relancées, doit rester 0 */
+    st_print_i32((int32_t)s.lost);
+    UART_Debug_Transmit_Char_LL('\n'); UART_Debug_Transmit_Char_LL('\r');
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
  * CALLBACKS INTERRUPTIONS
  * ═══════════════════════════════════════════════════════════════════════════ */
@@ -1047,9 +1091,10 @@ void ICM42688_DMA_RX_Complete_Callback(void)
  * (print bloquant ~0,5 ms dans le callback), un DRDY relançait alors une lecture
  * pendant que la précédente n'était pas finie (CS toujours bas) → échantillons
  * corrompus, y compris ceux fournis à la calibration accel.
- * Rançon de la même priorité : pendant un print debug, les DRDY sont fusionnés (il
- * ne reste qu'un seul "pending") → échantillons PERDUS, mais jamais faux. C'est pour
- * ça qu'accel_calib coupe debug_imu pendant une calibration puis le restaure.
+ * Rançon de la même priorité : si un callback dure plus de 125 µs, les DRDY sont
+ * fusionnés (il ne reste qu'un seul "pending") → échantillons PERDUS, mais jamais
+ * faux. C'est pour ça que le print debug_imu a été sorti de l'ISR (instantané +
+ * ICM42688_Debug_Process dans la boucle principale).
  * /!\ Si on régénère CubeMX avec d'autres priorités, ce raisonnement tombe.
  */
 void ICM42688_EXTI4_Callback(void)

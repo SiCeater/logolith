@@ -4,9 +4,10 @@
 #include "global.h"
 
 /* Flags de debug : passer à true pour activer l'affichage correspondant sur UART5.
- * Les prints sont BLOQUANTS (attente UART). debug_imu imprime depuis l'ISR DMA de
- * l'ICM (décimé ~10 Hz) ; debug_rc depuis la boucle principale (5 Hz). À n'activer
- * que sur le banc. */
+ * Les prints sont BLOQUANTS (attente UART) mais faits depuis la boucle principale
+ * (temps libre, préemptable par les IRQ) : debug_imu ~2 Hz (instantané pris dans
+ * l'ISR DMA de l'ICM, imprimé par ICM42688_Debug_Process), debug_rc 2 Hz. À
+ * n'activer que sur le banc. */
 bool debug_init = true;
 bool debug_rc   = true;
 bool debug_imu  = true;

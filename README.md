@@ -65,7 +65,7 @@ Like the rest of Aerolith — frame, ESCs and flight controller — Same philoso
 | Blackbox | W25Q128 SPI flash (16 MB) | SPI2 | in progress |
 | OSD | AT7456ELAH | SPI3 | in progress |
 | RC link | ExpressLRS 2.4 GHz, CRSF @ 420 kbaud | UART, DMA circular + IDLE | ✅ |
-| GPS | UART module | UART | in progress |
+| GPS + compass | u-blox M10 module with integrated magnetometer (QMC5883L / IST8310 class), mast-mounted away from power wiring | UART4 (GNSS), I2C (compass) | planned |
 | Motor outputs | OneShot125 | TIM1, TIM3, TIM8 | X4 version ✅, X8 version in progress, (RPM filtering planned for future F7 based custom FC with additional UARTs) |
 
 Power: 5 V rail from an LMR51430 buck, split 3V3 digital / analog rails, and a dedicated low-noise LDO (TPS7A2033) for the IMU.
@@ -102,7 +102,7 @@ A classic cascade:
 Logolith uses a **single-IMU** estimator: an adaptive Mahony filter running on the ICM-42688-P.
 
 - **Gated accelerometer correction.** Accelerometer feedback is weighted down when `‖a‖` departs from the reference norm measured at boot (≈ 1.025 g uncalibrated on the current board), so manoeuvres and vibration do not pull the horizon.
-- **Integral bias tracking.** The Mahony `Ki` term tracks the residual gyro bias in flight, on top of the boot calibration.
+- **Integral bias tracking.** The Mahony `Ki` term tracks the residual gyro bias in flight, on top of the boot calibration. This works on roll and pitch only, where gravity gives an absolute reference; the yaw bias is unobservable without the compass of the GNSS module.
 
 A BNO085 fusion chip was evaluated and dropped: running two different MEMS devices in an inner/outer cascade introduces coherence errors (different biases, scale factors and mounting) that cannot be tuned away, plus extra latency, for a marginal accuracy gain over a well-gated single-IMU filter.
 
@@ -153,16 +153,15 @@ Legend: ✅ done and verified on hardware · 🔧 in progress · 📋 planned
 | ICM-42688-P driver | ✅ | Multi-bank register map (banks 0/1/2/4), low-noise mode, gyro ±2000 dps and accel ±16 g both @ 8 kHz ODR, AAF configured, UI_DRDY on INT2 @ 8 kHz, 13-byte DMA burst. A lost DMA transfer is detected and restarted |
 | ICM-42688-P self-test | ✅ | MEMS self-test passes on gyro and accel |
 | Boot gyro calibration | ✅ | Bias measured at rest and written to the sensor's `OFFSET_USER` registers (~0.6 s, board still) |
-| Accel calibration | 🔧 | An accelerometer calibration (6 poses calibration) is needed on every new mounted chassis to suppress mounting related physical offsets and in sensors naturals offsets. Implemented, bench test pending: started from the radio (SA+SD held 2 s, throttle low), faces detected automatically in any order, bias + full 3×3 scale/cross-axis matrix, sanity checks, applied at 8 kHz in the DMA callback |
-| Persistent config storage | 🔧 | Implemented, bench test pending: flash sector 11 reserved (the link fails if the firmware grows into it), append-only log with CRC32, survives reflashing (except a full-chip erase) |
-| 1 ms timebase (SysTick) | 🔧 | SysTick interrupt now enabled (see design rule 7), to be confirmed on hardware |
+| Accel calibration | ✅ | An accelerometer calibration (6 poses calibration) is needed on every new mounted chassis to suppress mounting related physical offsets and in sensors naturals offsets. Verified on the bench: started from the radio (SA+SD held 2 s, throttle low), faces detected automatically in any order, bias + full 3×3 scale/cross-axis matrix, sanity checks, applied at 8 kHz in the DMA callback |
+| Persistent config storage | ✅ | Verified on the bench (calibration reloaded after reboot): flash sector 11 reserved (the link fails if the firmware grows into it), append-only log with CRC32, survives reflashing (except a full-chip erase) |
+| 1 ms timebase (SysTick) | ✅ | SysTick interrupt enabled (see design rule 7), confirmed on hardware (measured IMU rate consistent with the ICM clock tolerance) |
 | ELRS / CRSF receiver driver | ✅ | DMA circular buffer + IDLE interrupt, 3-state parser, CRC8 (DVB-S2), RC channels / link statistics / device frames, arming gated on link quality |
-| Gyro bias tracking at rest | 🔧 | Catches the post-power-up bias drift (~0.2–0.3 dps) left after the boot calibration |
 | Gated Mahony | 🔧 | |
 | Software notch + PT2 / PT1 filters | 🔧 | Notch placement for 640 KV / tri-blade |
 | Rate PID + Quad-X mixer | 📋 | Target: stable ACRO flight before ANGLE |
 | Motor output (OneShot125, then DShot) | OneShot125 ✅, DShot 🔧 | Init outputs the stop pulse only; ESC range calibration is a separate explicit procedure. Board pads M1..M8 mapped to TIM8 / TIM1 / TIM3 in the CubeMX config |
-| Arming, failsafe | 🔧 | Link-timeout detection cuts throttle and disarms; failsafe routine, arming lockouts and arm-switch cycling still to do |
+| Arming, failsafe | ✅ | Verified on the bench: arm switch SF (latching), armed on a rising edge only (switch left on at boot or when the link comes back must be cycled first), refused if link quality is low, throttle is not low, or an accelerometer calibration is running or missing; disarmed on switch off or link timeout. Motor outputs do not depend on it yet |
 | Angle loop (quaternion error) | 📋 | |
 | Barometer + altitude hold | 📋 | Complementary filter baro / vertical acceleration |
 | Optical flow position hold | 📋 | PMW3901 + VL53L1X |
@@ -183,7 +182,7 @@ Measured on LithCore, board at rest on a desk, genuine TDK ICM-42688-P (WHO_AM_I
 | Accel noise | ≈ 0.5 mg RMS | |
 | Raw gyro bias | ≈ −11 / −1.9 / −8.3 °/s (X/Y/Z) | Above the typical datasheet figure, which is not production-tested. Identical in dps at ±250 and ±2000 dps full scale → genuine analog zero-rate offset, not a configuration artifact |
 | Short-term bias stability | ±0.01 °/s | Session-to-session delta ≈ 0.3 °/s |
-| Residual after boot calibration | ≈ 0.2 °/s | Post-power-up drift, handled by bias tracking |
+| Residual after boot calibration | ≈ 0.2 °/s | Post-power-up drift. Roll/pitch: absorbed by the Mahony `Ki` term. Yaw: ≈ 12–18 °/min heading drift, negligible in ACRO / ANGLE (yaw is rate-controlled), corrected by the compass once fitted |
 | Accel norm at rest | ≈ 1.021–1.026 g | Z zero-g offset at the datasheet limit; corrected by a 6-position calibration on the frame, applied in software |
 | Self-test | PASS (gyro and accel) | |
 
@@ -195,33 +194,32 @@ Accelerometer offsets are deliberately **not** calibrated at boot: doing so woul
 
 ### Immediate next steps
 
-1. **Bench-test the accelerometer calibration:** run the 6 faces, check that the result is saved and reloaded after a reboot (the IMU debug print should read ~0 / 0 / ±9.81 m/s² when flat).
-2. **Choose a latching arm switch** (SF) and move `armed` off CH5: SA is a momentary push button on the radio.
-3. **Security module:** arming lockouts, arm-switch cycling after failsafe or calibration, real failsafe routine.
-4. **Motor mapping test** with `ESC_Test()` (props off): motor position and spin direction for each pad.
-5. Then Phase 2 below.
+1. **Motor mapping test** with `ESC_Test()` (props off): motor position and spin direction for each pad.
+2. **Fast loop skeleton** in the ICM data-ready path at 8 kHz, with its CPU budget measured by the DWT cycle counter (also gives the real `dt`).
+3. **Gyro filtering:** PT1 / PT2 low-pass and software notch, tuned on bench vibration data.
+4. **Rate PID + Quad-X mixer** with desaturation; stop pulse on every output whenever `Security_IsArmed()` is false.
+5. **ESC output rate:** raise OneShot125 above 1 kHz, then DShot.
 
 ### Known TODOs
 
-- **Re-arm after failsafe:** when the RC link comes back, `armed` follows the switch immediately, so the drone re-arms if the arm switch was left on. Arming must require the switch to be cycled first.
-- **Arming lockouts:** refuse arming while an accelerometer calibration is running (`AccelCal_InProgress()`), when no valid accelerometer calibration is loaded (`AccelCal_IsValid()`), and right after a calibration until the arm switch has been cycled.
+- **Motor cut on disarm:** the future rate loop / mixer must output the stop pulse whenever `Security_IsArmed()` is false.
 - **Motor mapping:** pad ↔ timer channel is confirmed (M1..M4 = PC6..PC9 = TIM8 CH1..CH4, M5..M7 = PA8..PA10 = TIM1, M8 = PB1 = TIM3); the motor position on each pad and the spin directions are still to check (see `esc_driver.c`).
 - **ESC update rate:** OneShot125 runs at 1 kHz; raise it (up to ~3.9 kHz) or move to DShot once the 8 kHz rate loop is in place.
 - **ESC_M8 timer scale:** TIM3 is clocked from APB1, so its timer runs at 12 MHz instead of 24 MHz and its pulse values are half those of M1..M7.
 
 ### Phases
 
-**Phase 1 — Sensing and link** *(mostly done)*
-ICM-42688-P driver, boot calibration, CRSF receiver, accelerometer 6-face calibration with flash storage (bench test pending). Remaining: bias tracking at rest.
+**Phase 1 — Sensing and link** *(done)*
+ICM-42688-P driver, boot calibration, CRSF receiver, accelerometer 6-face calibration with flash storage.
 
-**Phase 2 — ACRO flight**
+**Phase 2 — ACRO flight** *(next)*
 Software notch + PT2 + D-term filtering, rate PID, Quad-X mixer with desaturation, motor output, arming and failsafe. The drone must be stable in ACRO before anything else.
 
 **Phase 3 — ANGLE flight**
 Gated Mahony, quaternion error in body frame, angle loop. Hover tests.
 
 **Phase 4 — Altitude and position**
-LPS22HH over I2C (with the STM32F4 I2C errata handled: non-blocking transfers, timeouts, bus recovery), altitude hold, then optical-flow position hold with PMW3901 + VL53L1X, then GPS.
+LPS22HH over I2C (with the STM32F4 I2C errata handled: non-blocking transfers, timeouts, bus recovery), altitude hold, then optical-flow position hold with PMW3901 + VL53L1X, then GPS + compass (u-blox M10, UBX `NAV-PVT`) with magnetometer calibration.
 
 **Phase 5 — Tooling**
 Blackbox logging to SPI flash, OSD, CLI for in-field gain tuning.

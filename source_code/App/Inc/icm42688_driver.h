@@ -388,8 +388,8 @@
  */
 #define ICM42688_BURST_LEN              13U
 
-/* Fast loop à 8 kHz : print debug_imu 1 échantillon sur 800 → ~10 Hz */
-#define ICM42688_DEBUG_PRINT_DIV        800U
+/* Fast loop à 8 kHz : instantané debug_imu 1 échantillon sur 4000 → ~2 Hz */
+#define ICM42688_DEBUG_PRINT_DIV        4000U
  
 /* ═══════════════════════════════════════════════════════════════════════════
  * STRUCTURE DE DONNÉES
@@ -418,6 +418,10 @@ typedef struct {
  /*bite*/
 /* Instance globale */
 extern icm42688_data_t icm42688;
+
+/* Print debug IMU (debug_imu, ~2 Hz) : à appeler à chaque tour de la boucle
+ * principale. Ne fait rien tant que l'ISR DMA n'a pas posé d'instantané. */
+void ICM42688_Debug_Process(void);
  
 /* ═══════════════════════════════════════════════════════════════════════════
  * API PUBLIQUE

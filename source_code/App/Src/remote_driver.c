@@ -131,11 +131,11 @@ static uint8_t uint16_to_dec(uint16_t val, char *out)
  * Appelé depuis Remote_Process (boucle principale ~500 Hz), JAMAIS depuis l'ISR :
  * avant, chaque trame (jusqu'à 500-1000/s) était imprimée dans l'IRQ USART2, soit
  * ~0,8 ms de print bloquant par trame → console saturée et IRQ monopolisée.
- * Ici : une ligne toutes les CRSF_DEBUG_PERIOD_MS (5 Hz), format :
+ * Ici : une ligne toutes les CRSF_DEBUG_PERIOD_MS (2 Hz), format :
  *   "RC LQ:100 THR:0% CH: 992 992 172 992 1811 172 172 1811 992 992 992 992"
  *   (12 premiers canaux bruts 172-1811, CH1 en premier ; LQ = link quality %)
  * ou "RC: pas de lien (failsafe)" si aucune trame valide depuis 100 ms. */
-#define CRSF_DEBUG_PERIOD_MS   200U
+#define CRSF_DEBUG_PERIOD_MS   500U
 #define CRSF_DEBUG_NB_CH       12U     /* la radio n'envoie que 12 canaux utiles */
 
 static void crsf_debug_print(const uint16_t ch[16], bool link_ok, uint32_t now)
@@ -394,7 +394,6 @@ void Remote_Process(float dt)
             rc_failsafe.count++;
         }
         rc_failsafe.state     = FAILSAFE_ACTIVE;
-        rc_switches.armed     = false;  // sinon l'état armé reste figé à sa dernière valeur
         rc_axes.throttle      = 0.0f;
         rc_axes.throttle_filt = 0.0f;   // coupe le throttle, ne pas toucher roll/pitch
         lpf_throttle.y        = 0.0f;   // repart de 0 au retour du lien (pas de saut)
@@ -408,7 +407,6 @@ void Remote_Process(float dt)
     memcpy(rc_ch, ch, sizeof(rc_ch));   // valeurs brutes, uniquement quand le lien est OK
 
     /* --- 2. Switches --- */
-    rc_switches.armed       = rc_decode_switch_2pos(ch[4]);
     rc_switches.flight_mode = rc_decode_switch_3pos(ch[5]);
     rc_switches.beeper      = rc_decode_switch_2pos(ch[6]);
     rc_switches.blackbox    = rc_decode_switch_2pos(ch[7]);

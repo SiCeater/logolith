@@ -103,10 +103,8 @@ typedef struct {
 } rc_axes_t;
 
 typedef struct {
-    bool            armed;          // CH5 (> 992 = armé). Forcé à false en failsafe.
-                                    // /!\ CH5 = SA est un POUSSOIR sur la radio : à remplacer
-                                    // par un switch à position stable (SF = CH10, verrouillable ?)
-                                    // /!\ aucun moteur ne dépend encore de ce flag (cf. security.c)
+    /* Pas de flag "armed" ici : l'armement (switch SF = CH10, front montant,
+     * conditions) est géré par security.c → Security_IsArmed(). */
     flight_mode_t   flight_mode;    // CH6
     bool            beeper;         // CH7
     bool            blackbox;       // CH8

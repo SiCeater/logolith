@@ -6,9 +6,10 @@
  * Fonctionnement : envoi en "polling", octet par octet, en attendant TXE (registre
  * de transmission vide). Simple et fiable, mais BLOQUANT : à 921600 bauds, un
  * caractère prend ~11 µs, soit ~0,5 ms pour une ligne de 50 caractères. Appelé depuis une
- * ISR (debug_imu), ça décale toutes les autres interruptions de même
- * priorité ou moins prioritaires. Exemple : une ligne IMU (~0,5 ms) représente 4
- * périodes de la boucle 8 kHz, d'où les prints IMU décimés à ~10 Hz.
+ * ISR, ça décale toutes les autres interruptions de même priorité ou moins
+ * prioritaires (une ligne IMU ~0,5 ms = 4 périodes de la boucle 8 kHz). Règle :
+ * les prints périodiques (debug_imu, debug_rc) se font depuis la boucle
+ * principale, jamais depuis une ISR : l'ISR ne fait que poser un instantané.
  *
  * Pas de printf : avec newlib-nano, printf ne gère pas les flottants sans l'option
  * de link -u _printf_float (+~10 Ko). Les valeurs sont donc converties en

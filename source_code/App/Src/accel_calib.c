@@ -91,6 +91,7 @@
 #include "config.h"
 #include "remote_driver.h"
 #include "led_driver.h"
+#include "security.h"
 #include "debug.h"
 #include <math.h>
 #include <string.h>
@@ -128,7 +129,11 @@ static win_acc_t         acc;            /* fenêtre en cours d'accumulation */
 static win_t             win;            /* dernière fenêtre publiée */
 static volatile bool     feeding   = false;  /* true = calibration en cours, l'ISR accumule */
 static volatile bool     win_ready = false;  /* "boîte aux lettres" ISR → boucle */
-static volatile uint32_t win_count = 0;      /* nb total de fenêtres → fréquence IMU réelle */
+/* Nb total d'échantillons reçus → fréquence IMU réelle. On compte les
+ * échantillons et non les fenêtres : compter des fenêtres de 800 (100 ms)
+ * donnait une résolution de 400 Hz sur 2 s, et la 20e fenêtre finissant
+ * pile vers t = 2000 ms, on en lisait souvent 19 → "7600 Hz" à tort. */
+static volatile uint32_t sample_count = 0;
 
 /* Appelée par l'ISR DMA de l'ICM à chaque échantillon (8 kHz). Doit rester
  * très courte : pas de flottant dans le chemin courant, une seule division
@@ -136,6 +141,7 @@ static volatile uint32_t win_count = 0;      /* nb total de fenêtres → fréqu
 void AccelCal_Feed(const int16_t a[3], const int16_t g[3])
 {
     if (!feeding) return;      /* hors calibration : coût = un test */
+    sample_count++;
 
     if (acc.n == 0U) {         /* début de fenêtre : min/max initialisés sur le 1er échantillon */
         for (uint8_t k = 0; k < 3U; k++) {
@@ -167,7 +173,6 @@ void AccelCal_Feed(const int16_t a[3], const int16_t g[3])
             win.gptp  = gp;
             win_ready = true;   /* en dernier : `win` est complet quand la boucle le voit */
         }
-        win_count++;
         acc.n = 0;
     }
 }
@@ -236,7 +241,7 @@ typedef enum { ACAL_IDLE, ACAL_WAIT_POSE, ACAL_CAPTURE, ACAL_RESULT } acal_state
 static acal_state_t state = ACAL_IDLE;
 static uint32_t     t_start;         /* get_ms() au démarrage (timeout, mesure fréquence) */
 static uint32_t     t_result;        /* get_ms() à la fin (durée affichage LED résultat) */
-static uint32_t     win_start;       /* win_count au démarrage (mesure fréquence) */
+static uint32_t     smp_start;       /* sample_count au démarrage (mesure fréquence) */
 static bool         rate_printed;    /* fréquence IMU déjà affichée */
 static bool         result_ok;       /* résultat du calcul, pour la LED en RESULT */
 static float        meas[6][3];      /* moyenne mesurée par face (LSB), index = pose_name */
@@ -262,6 +267,7 @@ static uint32_t trig_since;
 static bool trigger_event(uint32_t now)
 {
     bool on = rc_is_valid() && rc_failsafe.state != FAILSAFE_ACTIVE &&
+              !Security_IsArmed() &&                 /* jamais drone armé */
               rc_ch[ACAL_TRIG_CH_SA] > ACAL_TRIG_HIGH &&
               rc_ch[ACAL_TRIG_CH_SD] > ACAL_TRIG_HIGH &&
               rc_axes.throttle < ACAL_TRIG_THROTTLE_MAX;
@@ -279,10 +285,9 @@ static void leds_off(void) { R_LED_Off(); B_LED_Off(); }
 
 /* debug_imu et debug_rc sont coupés pendant la calibration puis remis dans leur
  * état d'avant.
- *   - debug_imu : le print se fait DANS l'ISR DMA de l'ICM et bloque ~0,5 ms.
- *     Pendant ce temps des DRDY sont perdus (cf. ICM42688_EXTI4_Callback) : moins
- *     d'échantillons par fenêtre et fréquence IMU mesurée fausse (< 8000 Hz).
- *   - debug_rc : imprimé depuis la boucle principale (5 Hz), il ne gêne pas la
+ *   - debug_imu : le print se fait désormais hors ISR (ICM42688_Debug_Process),
+ *     il ne fait plus perdre de DRDY, mais noierait les messages ACAL.
+ *   - debug_rc : imprimé depuis la boucle principale (2 Hz), il ne gêne pas la
  *     mesure, mais noierait les messages ACAL (faces, résultat) dans la console.
  * Les messages ACAL, eux, sont imprimés depuis la boucle principale. */
 static bool dbg_imu_saved   = false;   /* valeur de debug_imu avant la calibration */
@@ -528,7 +533,7 @@ void AccelCal_Process(void)
         if (trig) {
             memset(meas, 0, sizeof(meas));
             done_mask = 0; cand_pose = -1; settle_cnt = 0;
-            t_start = now; win_start = win_count; rate_printed = false;
+            t_start = now; smp_start = sample_count; rate_printed = false;
             feed_start();
             state = ACAL_WAIT_POSE;
             cal_print("\n\r\n\rACAL : calibration accel 6 faces demarree. Poser le drone sur chaque face,"
@@ -543,9 +548,11 @@ void AccelCal_Process(void)
 
         if (!rate_printed && (now - t_start) >= 2000U) {
             /* Diagnostic gratuit : fréquence réelle du DRDY de l'ICM, mesurée
-             * en comptant les fenêtres sur 2 s. Attendu : 8000 Hz. Une valeur
+             * en comptant les échantillons sur ~2 s. Attendu : 8000 Hz, à
+             * l'oscillateur interne de l'ICM près (quelques dizaines de Hz) et
+             * ±~4 Hz d'incertitude (t_start au ms près). Une valeur nettement
              * plus basse = interruptions perdues (cf. INT_CONFIG1 dans le driver ICM). */
-            uint32_t hz = ((win_count - win_start) * ACAL_WIN_SAMPLES * 1000U) / (now - t_start);
+            uint32_t hz = ((sample_count - smp_start) * 1000U) / (now - t_start);
             cal_print("\n\rACAL : frequence IMU mesuree = "); cal_print_i32((int32_t)hz); cal_print(" Hz");
             rate_printed = true;
         }

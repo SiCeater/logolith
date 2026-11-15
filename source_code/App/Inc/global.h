@@ -15,8 +15,8 @@
 
 /* ── Flags de debug (console UART5) ── voir global.c */
 extern bool debug_init;   /* messages d'init (ICM, ESC, self-test, calibration gyro) */
-extern bool debug_rc;     /* LQ, throttle et 12 canaux bruts, 5 Hz (depuis Remote_Process) */
-extern bool debug_imu;    /* valeurs IMU ~10 Hz (dans l'ISR DMA de l'ICM) */
+extern bool debug_rc;     /* LQ, throttle et 12 canaux bruts, 2 Hz (depuis Remote_Process) */
+extern bool debug_imu;    /* valeurs IMU ~2 Hz (ICM42688_Debug_Process, boucle principale) */
 extern bool debug_warn;   /* avertissements (perte de lien RC…) */
 
 /* ── Non utilisés pour l'instant (réservés : fusion IMU, magnéto BNO085) ── */
