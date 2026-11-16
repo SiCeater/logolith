@@ -6,6 +6,7 @@
 volatile uint8_t rx_buffer[RX_BUFFER_SIZE];
 volatile uint8_t rx_head = 0;
 volatile uint8_t rx_tail = 0;
+volatile uint32_t rx_dropped = 0;
 
 void UART4_LL_IT_INIT(void)
 {
@@ -57,6 +58,8 @@ void UART4_IRQHandler(void)
         if (next_head != rx_tail) { // avoid erasing unread data
             rx_buffer[rx_head] = received_byte;
             rx_head = next_head;
+        } else {
+            rx_dropped++;
         }
     }
 
