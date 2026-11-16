@@ -92,6 +92,7 @@
 #include "remote_driver.h"
 #include "led_driver.h"
 #include "security.h"
+#include "esc_calib.h"
 #include "debug.h"
 #include <math.h>
 #include <string.h>
@@ -266,6 +267,11 @@ static uint32_t trig_since;
 
 static bool trigger_event(uint32_t now)
 {
+    /* Pendant la calibration ESC, SA + SD servent à en SORTIR (gaz souvent en
+     * bas) : on bloque ici et on exige un relâchement complet après coup, pour
+     * qu'un SA + SD prolongé ne lance pas une calibration accel derrière. */
+    if (EscCal_InProgress()) { trig_holding = false; trig_rearmed = false; return false; }
+
     bool on = rc_is_valid() && rc_failsafe.state != FAILSAFE_ACTIVE &&
               !Security_IsArmed() &&                 /* jamais drone armé */
               rc_ch[ACAL_TRIG_CH_SA] > ACAL_TRIG_HIGH &&
@@ -283,7 +289,7 @@ static bool trigger_event(uint32_t now)
 
 static void leds_off(void) { R_LED_Off(); B_LED_Off(); }
 
-/* debug_imu et debug_rc sont coupés pendant la calibration puis remis dans leur
+/* debug_imu, debug_rc et debug_loop sont coupés pendant la calibration puis remis dans leur
  * état d'avant.
  *   - debug_imu : le print se fait désormais hors ISR (ICM42688_Debug_Process),
  *     il ne fait plus perdre de DRDY, mais noierait les messages ACAL.
@@ -292,6 +298,7 @@ static void leds_off(void) { R_LED_Off(); B_LED_Off(); }
  * Les messages ACAL, eux, sont imprimés depuis la boucle principale. */
 static bool dbg_imu_saved   = false;   /* valeur de debug_imu avant la calibration */
 static bool dbg_rc_saved    = false;   /* valeur de debug_rc avant la calibration */
+static bool dbg_loop_saved  = false;   /* valeur de debug_loop avant la calibration */
 static bool dbg_stashed     = false;   /* true = valeurs sauvegardées, à restaurer */
 
 /* Démarre l'accumulation côté ISR, en repartant d'une fenêtre vide.
@@ -300,9 +307,11 @@ static void feed_start(void)
 {
     dbg_imu_saved = debug_imu;
     dbg_rc_saved  = debug_rc;
+    dbg_loop_saved = debug_loop;
     dbg_stashed   = true;
     debug_imu     = false;
     debug_rc      = false;
+    debug_loop    = false;
 
     __disable_irq();
     acc.n     = 0;
@@ -313,7 +322,7 @@ static void feed_start(void)
 
 static void feed_stop(void) { feeding = false; win_ready = false; }
 
-/* Remet debug_imu et debug_rc comme avant la calibration. Appelé au retour en
+/* Remet debug_imu, debug_rc et debug_loop comme avant la calibration. Appelé au retour en
  * ACAL_IDLE (annulation, ou fin des 3 s d'affichage du résultat) et pas dans
  * feed_stop : sinon les prints se mélangeraient aux messages du résultat. */
 static void dbg_restore(void)
@@ -321,6 +330,7 @@ static void dbg_restore(void)
     if (dbg_stashed) {
         debug_imu   = dbg_imu_saved;
         debug_rc    = dbg_rc_saved;
+        debug_loop  = dbg_loop_saved;
         dbg_stashed = false;
     }
 }

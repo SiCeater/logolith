@@ -19,19 +19,46 @@
  * (période > 250 µs). À revoir quand le PID sera branché (ou DShot, cf. README).
  *
  * ═══════════════════════════════════════════════════════════════════════════
- * CORRESPONDANCE MOTEURS ↔ CANAUX  /!\ À VÉRIFIER SUR LE DRONE /!\
+ * CORRESPONDANCE MOTEURS ↔ CANAUX
  * ═══════════════════════════════════════════════════════════════════════════
  * Sorties de la LithCore (sérigraphie M1..M8 = labels CubeMX ESC_Mx, confirmés) :
  *   M1 = PC6 TIM8_CH1   M2 = PC7 TIM8_CH2   M3 = PC8 TIM8_CH3   M4 = PC9 TIM8_CH4
  *   M5 = PA8 TIM1_CH1   M6 = PA9 TIM1_CH2   M7 = PA10 TIM1_CH3  M8 = PB1 TIM3_CH4
  *
- * Ce que fait le code aujourd'hui (fonction → sortie) :
- *   ESC_RL_MS → CH1 → M1        ESC_FL_MS → CH2 → M2
- *   ESC_RR_MS → CH3 → M3        ESC_FR_MS → CH4 → M4
- * La sortie ↔ pad est sûre ; ce qui reste À VÉRIFIER, c'est la position du moteur
- * branché sur chaque pad (avant gauche, etc.). Avant le premier vol : ESC_Test()
- * (hélices démontées) pour vérifier que chaque fonction fait tourner le bon moteur,
- * ET le sens de rotation attendu par le mixer.
+ * Position et sens des moteurs, relevés au banc sur Aerolith (motor_test.c).
+ * NB : un premier relevé avait été fait drone face à l'opérateur (caméra vers
+ * lui), donc tourné de 180° ; corrigé ci-dessous (avant = côté caméra).
+ *   M1 (CH1) = arrière gauche (RL), horaire       M2 (CH2) = avant gauche (FL), anti-horaire
+ *   M3 (CH3) = arrière droit  (RR), anti-horaire  M4 (CH4) = avant droit  (FR), horaire
+ * Vu de dessus, avant (caméra) en haut :
+ *          M2 (FL) ↺   M4 (FR) ↻
+ *                \     /
+ *                /     \
+ *          M1 (RL) ↻   M3 (RR) ↺
+ * Les diagonales tournent dans le même sens (FR/RL horaires, FL/RR anti-horaires) :
+ * Quad-X cohérent, en configuration "props out" (vu de dessus, à l'avant du
+ * drone les pales s'écartent de l'axe : FL vers la gauche, FR vers la droite),
+ * c.-à-d. le "motor direction reversed" de Betaflight.
+ * Pour le mixeur yaw : le couple de réaction sur le châssis est OPPOSÉ au sens
+ * de l'hélice. Accélérer les horaires (M1, M4) fait tourner le drone en
+ * anti-horaire vu de dessus (nez à gauche) ; accélérer les anti-horaires (M2, M3)
+ * le fait tourner en horaire (nez à droite).
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * PLAGE UTILE DES ESC : 15 % … 83 % (ESC NON CALIBRÉS)
+ * ═══════════════════════════════════════════════════════════════════════════
+ * Mesuré au banc : le moteur démarre vers 15 % et n'accélère plus au-delà de
+ * ~83 %. Ces deux bornes tombent pile sur les réglages PAR DÉFAUT des ESC BLHeli
+ * en entrée PWM : min throttle 1148 µs, max throttle 1832 µs. En OneShot125 la
+ * durée est divisée par 8 : 143,5 µs et 229 µs, soit
+ *     (143,5 − 125) / 125 = 14,8 %      (229 − 125) / 125 = 83,2 %
+ * Ce n'est donc pas l'absence d'hélice (sans charge le moteur accélérerait
+ * jusqu'à son max, sans plafond net), mais l'ESC qui sature : tout ce qui
+ * dépasse 229 µs est lu comme plein gaz, tout ce qui est sous 143,5 µs comme arrêt.
+ * Conséquence : on perd ~32 % de la résolution de commande. Remède : calibrer la
+ * plage des ESC (mode radio esc_calib.c, ou min/max throttle 1000/2000 dans BLHeliSuite),
+ * puis remesurer ESC_CMD_START. Le passage au DShot (numérique, sans calibration)
+ * règlera le problème pour de bon.
  */
 #include "esc_driver.h"
 #include "global.h"
@@ -82,32 +109,6 @@ void ESC_Init(void)
 }
 
 /**
- * @brief /!\ CALIBRATION DE PLAGE DES ESC — HÉLICES DÉMONTÉES /!\
- *
- * Apprend aux ESC les bornes du signal : plein gaz (250 µs) pendant 2 s, puis
- * arrêt (125 µs) pendant 2 s. Procédure standard : alimenter les ESC (batterie)
- * PENDANT que le plein gaz est envoyé, ils entrent alors en mode calibration.
- *
- * DANGER : si les ESC sont déjà alimentés et armés quand cette fonction est
- * appelée (reboot du FC sur batterie, par exemple), les moteurs partent à plein
- * régime pendant 2 s. Elle était auparavant dans ESC_Init, donc exécutée à chaque
- * boot : elle en a été sortie. À lancer seulement volontairement, sur le banc,
- * une fois par jeu d'ESC (les ESC mémorisent la plage).
- */
-void ESC_Calibrate(void)
-{
-    R_LED_On();
-    ESC_Set_Values(ESC_CMD_MAX, ESC_CMD_MAX, ESC_CMD_MAX, ESC_CMD_MAX);  /* 250 µs = plein gaz */
-    LL_mDelay(2000);
-    ESC_Set_Values(0, 0, 0, 0);                                          /* 125 µs = arrêt */
-    LL_mDelay(2000);
-    R_LED_Off();
-
-    if (debug_init)
-        print_to_console("\n\rESCs : range calibrated", 25);
-}
-
-/**
  * @brief Consigne des 4 moteurs, chacun de 0 (arrêt) à 3000 (plein gaz). Saturé.
  * @note  Ordre des paramètres : FL, FR, RR, RL (sens horaire depuis l'avant gauche).
  */
@@ -129,20 +130,28 @@ void ESC_Set_Global_Values(void)
 /* Un moteur : commande 0-3000 → compare 3000-6000 (125-250 µs).
  * Grâce à la preload, le nouveau compare est pris en compte à la période suivante :
  * jamais d'impulsion tronquée si on écrit en plein milieu d'une impulsion. */
-void ESC_RL_MS(uint16_t x) { LL_TIM_OC_SetCompareCH1(TIM8, ESC_CCR_MIN + esc_clamp(x)); }
-void ESC_FL_MS(uint16_t x) { LL_TIM_OC_SetCompareCH2(TIM8, ESC_CCR_MIN + esc_clamp(x)); }
-void ESC_RR_MS(uint16_t x) { LL_TIM_OC_SetCompareCH3(TIM8, ESC_CCR_MIN + esc_clamp(x)); }
-void ESC_FR_MS(uint16_t x) { LL_TIM_OC_SetCompareCH4(TIM8, ESC_CCR_MIN + esc_clamp(x)); }
+void ESC_RL_MS(uint16_t x) { LL_TIM_OC_SetCompareCH1(TIM8, ESC_CCR_MIN + esc_clamp(x)); }  /* M1 */
+void ESC_FL_MS(uint16_t x) { LL_TIM_OC_SetCompareCH2(TIM8, ESC_CCR_MIN + esc_clamp(x)); }  /* M2 */
+void ESC_RR_MS(uint16_t x) { LL_TIM_OC_SetCompareCH3(TIM8, ESC_CCR_MIN + esc_clamp(x)); }  /* M3 */
+void ESC_FR_MS(uint16_t x) { LL_TIM_OC_SetCompareCH4(TIM8, ESC_CCR_MIN + esc_clamp(x)); }  /* M4 */
 
-/**
- * @brief /!\ HÉLICES DÉMONTÉES /!\ Test moteur par moteur (bloquant ~8 s) :
- *        FL, FR, RR, RL, chacun 1 s à mi-gaz puis 1 s à plein gaz.
- *        Sert à vérifier la correspondance fonction ↔ moteur (tableau en tête).
- */
-void ESC_Test(void)
+/* Un pad par son NUMÉRO de sérigraphie (1..4 = M1..M4 = TIM8 CH1..CH4), sans
+ * présumer de la position du moteur : utilisé par le test de correspondance
+ * (motor_test.c). Commande 0-3000, saturée ; pad hors 1..4 ignoré. */
+void ESC_Set_Pad(uint8_t pad, uint16_t cmd)
 {
-    ESC_FL_MS(1500); LL_mDelay(1000); ESC_FL_MS(3000); LL_mDelay(1000); ESC_FL_MS(0);
-    ESC_FR_MS(1500); LL_mDelay(1000); ESC_FR_MS(3000); LL_mDelay(1000); ESC_FR_MS(0);
-    ESC_RR_MS(1500); LL_mDelay(1000); ESC_RR_MS(3000); LL_mDelay(1000); ESC_RR_MS(0);
-    ESC_RL_MS(1500); LL_mDelay(1000); ESC_RL_MS(3000); LL_mDelay(1000); ESC_RL_MS(0);
+    uint32_t ccr = ESC_CCR_MIN + esc_clamp(cmd);
+    switch (pad) {
+    case 1: LL_TIM_OC_SetCompareCH1(TIM8, ccr); break;
+    case 2: LL_TIM_OC_SetCompareCH2(TIM8, ccr); break;
+    case 3: LL_TIM_OC_SetCompareCH3(TIM8, ccr); break;
+    case 4: LL_TIM_OC_SetCompareCH4(TIM8, ccr); break;
+    default: break;
+    }
+}
+
+/* Impulsion d'arrêt (125 µs) sur les 4 sorties. */
+void ESC_Stop_All(void)
+{
+    for (uint8_t p = 1; p <= 4U; p++) ESC_Set_Pad(p, 0);
 }

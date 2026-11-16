@@ -14,13 +14,14 @@
 
 #define ESC_CMD_MAX     3000U   /* plein gaz */
 #define ESC_CCR_MIN     3000U   /* compare TIM8 pour 125 µs (24 MHz × 125 µs) */
+#define ESC_CMD_START   450U    /* 15 % : seuil de démarrage moteur mesuré au banc */
+#define ESC_CMD_SAT     2500U   /* ~83 % : au-delà, l'ESC (non calibré) ne va pas plus vite.
+                                 * Ces deux valeurs sont à remesurer après la calibration ESC (esc_calib.c). */
 
 /* Démarre TIM8 et sort l'impulsion d'arrêt (125 µs) sur les 4 moteurs. Sans risque. */
 void ESC_Init(void);
 
-/* /!\ DANGEREUX — HÉLICES DÉMONTÉES. Calibration de la plage des ESC (plein gaz
- * 2 s puis arrêt 2 s). Bloquant 4 s. À ne lancer que volontairement, jamais au boot. */
-void ESC_Calibrate(void);
+/* Calibration de plage des ESC : mode radio dans esc_calib.c. */
 
 void ESC_Set_Values(uint16_t front_left_motor, uint16_t front_right_motor,
                     uint16_t rear_right_motor, uint16_t rear_left_motor);
@@ -30,7 +31,8 @@ void ESC_FR_MS(uint16_t x);
 void ESC_RR_MS(uint16_t x);
 void ESC_RL_MS(uint16_t x);
 
-/* /!\ HÉLICES DÉMONTÉES. Fait tourner chaque moteur l'un après l'autre (bloquant ~8 s). */
-void ESC_Test(void);
+/* Position des pads (vu de dessus, avant = caméra) : M1 = RL, M2 = FL, M3 = RR, M4 = FR. */
+void ESC_Set_Pad(uint8_t pad, uint16_t cmd);   /* pad 1..4 = M1..M4 (sérigraphie) */
+void ESC_Stop_All(void);                        /* impulsion d'arrêt sur les 4 sorties */
 
 #endif

@@ -18,6 +18,7 @@ extern bool debug_init;   /* messages d'init (ICM, ESC, self-test, calibration g
 extern bool debug_rc;     /* LQ, throttle et 12 canaux bruts, 2 Hz (depuis Remote_Process) */
 extern bool debug_imu;    /* valeurs IMU ~2 Hz (ICM42688_Debug_Process, boucle principale) */
 extern bool debug_warn;   /* avertissements (perte de lien RC…) */
+extern bool debug_loop;   /* stats boucle rapide ~1 Hz : fréquence, exécution, CPU (FastLoop_Debug_Process) */
 
 /* ── Non utilisés pour l'instant (réservés : fusion IMU, magnéto BNO085) ── */
 extern int16_t AccData[3];

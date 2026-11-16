@@ -11,6 +11,7 @@
 #include "stm32f4xx_ll_spi.h"
 #include "stm32f4xx_ll_utils.h"
 #include "accel_calib.h"
+#include "fast_loop.h"
  
 /* ═══════════════════════════════════════════════════════════════════════════
  * INSTANCE PUBLIQUE et BUFFERS DMA
@@ -1122,6 +1123,10 @@ void ICM42688_DMA2_Stream0_Callback(void)
 {
     /*
      * Wrapper pour appel depuis stm32f4xx_it.c (DMA2_Stream0_IRQHandler).
+     * t_entry est lu en tout premier : FastLoop_Run s'en sert pour le dt réel
+     * et pour mesurer le temps de toute la chaîne (lecture + boucle rapide).
      */
+    uint32_t t_entry = FastLoop_Cycles();
     ICM42688_DMA_RX_Complete_Callback();
+    FastLoop_Run(t_entry);
 }

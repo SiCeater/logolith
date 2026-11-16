@@ -42,6 +42,7 @@
 #include "debug.h"
 #include "remote_driver.h"
 #include "accel_calib.h"
+#include "esc_calib.h"
 #include <string.h>
 
 #define ARM_SWITCH_CH       9U      /* index 9 = CH10 = SF (poussoir verrouillable) */
@@ -72,6 +73,7 @@ static const char *arm_refusal(void)
     if (rc_failsafe.state != FAILSAFE_OK)  return "lien radio faible";
     if (rc_axes.throttle >= ARM_THROTTLE_MAX) return "gaz pas en bas";
     if (AccelCal_InProgress())             return "calibration accel en cours";
+    if (EscCal_InProgress())               return "calibration ESC en cours";
     if (!AccelCal_IsValid())               return "pas de calibration accel";
     return NULL;
 }

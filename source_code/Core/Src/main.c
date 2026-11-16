@@ -36,6 +36,9 @@
 #include "icm42688_driver.h"
 #include "config.h"
 #include "accel_calib.h"
+#include "motor_test.h"
+#include "esc_calib.h"
+#include "fast_loop.h"
 
 /* USER CODE END Includes */
 
@@ -143,22 +146,31 @@ int main(void)
   /* USER CODE BEGIN 2 */
 
   /* ── Séquence de boot applicative (ordre important) ──────────────────────
-   * 1. Remote_Init     : démarre la réception CRSF (DMA + IRQ IDLE USART2). Non bloquant :
+   * 1. ESC_Init        : impulsion d'ARRÊT sur M1..M4, en premier pour que les ESC reçoivent
+   *                      un signal valide (et s'arment, "bips") pendant le reste du boot.
+   *                      Ne fait jamais tourner un moteur.
+   * 2. Remote_Init     : démarre la réception CRSF (DMA + IRQ IDLE USART2). Non bloquant :
    *                      ne fait PAS attendre la radio, les trames arrivent ensuite en tâche de fond.
-   * 2. Config_Load     : lit la config sauvegardée (flash secteur 11) → g_config.
-   * 3. ICM42688_Init   : config IMU + self-test + calibration GYRO automatique (BLOQUANT
+   * 3. Config_Load     : lit la config sauvegardée (flash secteur 11) → g_config.
+   *    FastLoop_Init   : compteur de cycles DWT, avant les premières IRQ DMA de l'ICM.
+   * 4. ICM42688_Init   : config IMU + self-test + calibration GYRO automatique (BLOQUANT
    *                      quelques secondes, drone IMMOBILE requis), puis lance la lecture DMA 8 kHz.
-   * 4. AccelCal_Init   : applique la calibration ACCEL sauvegardée (ne lance aucune calibration).
-   * 5. Boucle          : slow loop ~500 Hz (RC, armement sur SF, calibration accel par SA+SD),
-   *                      puis print debug IMU dans le temps libre.
+   * 5. AccelCal_Init   : applique la calibration ACCEL sauvegardée (ne lance aucune calibration).
+   * 6. Boucle          : slow loop ~500 Hz (RC, armement sur SF, test moteurs par SD,
+   *                      calibration accel par SA+SD gaz bas, calibration ESC par SA+SD
+   *                      gaz haut), puis prints debug dans le temps libre.
+   *    La boucle rapide 8 kHz (fast_loop.c) tourne, elle, dans l'IRQ DMA de l'ICM.
    *
-   * ESC (pas encore appelés) : ESC_Init() envoie seulement l'impulsion d'arrêt (sans risque).
-   * ESC_Calibrate() et ESC_Test() font tourner les moteurs : HÉLICES DÉMONTÉES, jamais au boot. */
+   * Aucune calibration ESC au boot : elle se fait volontairement à la radio, HÉLICES
+   * DÉMONTÉES (esc_calib.c). */
+
+  ESC_Init();             /* impulsion d'arrêt, sans risque */
 
   Remote_Init();
 
   Config_Load();          /* config persistante (flash secteur 11) → g_config */
 
+  FastLoop_Init();         /* DWT : dt réel et budget CPU de la boucle rapide */
   ICM42688_Init();
   AccelCal_Init();        /* applique la calibration accel sauvegardée, s'il y en a une */
 
@@ -180,11 +192,14 @@ int main(void)
     if (period_elapsed(&slow_last_ms, SLOW_LOOP_PERIOD_MS, &slow_dt)) {
       Remote_Process(slow_dt);   /* RC : canaux, axes, failsafe */
       Security_Process();        /* armement / désarmement, APRÈS Remote_Process */
+      MotorTest_Process();       /* test moteurs (armé + SD), HÉLICES DÉMONTÉES */
+      EscCal_Process();          /* calibration ESC (désarmé, gaz haut, SA+SD 2 s) */
       AccelCal_Process();        /* calibration accel (SA+SD 2 s) */
     }
 
-    /* Temps libre : print debug IMU (bloquant mais préemptable par toutes les IRQ) */
-    if (debug_imu) ICM42688_Debug_Process();
+    /* Temps libre : prints debug (bloquants mais préemptables par toutes les IRQ) */
+    if (debug_imu)  ICM42688_Debug_Process();
+    if (debug_loop) FastLoop_Debug_Process();
   }
   /* USER CODE END 3 */
 }

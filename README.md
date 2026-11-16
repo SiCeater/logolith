@@ -160,7 +160,7 @@ Legend: ✅ done and verified on hardware · 🔧 in progress · 📋 planned
 | Gated Mahony | 🔧 | |
 | Software notch + PT2 / PT1 filters | 🔧 | Notch placement for 640 KV / tri-blade |
 | Rate PID + Quad-X mixer | 📋 | Target: stable ACRO flight before ANGLE |
-| Motor output (OneShot125, then DShot) | OneShot125 ✅, DShot 🔧 | Init outputs the stop pulse only; ESC range calibration is a separate explicit procedure. Board pads M1..M8 mapped to TIM8 / TIM1 / TIM3 in the CubeMX config |
+| Motor output (OneShot125, then DShot) | OneShot125 ✅, DShot 🔧 | Init outputs the stop pulse only; ESC range calibration is a separate explicit procedure. Board pads M1..M8 mapped to TIM8 / TIM1 / TIM3 in the CubeMX config. Motor positions and spin directions verified on the bench with a radio-triggered one-by-one spin test (props off), quad-X props-out. Usable range with uncalibrated ESCs: start ≈ 15 %, saturation ≈ 83 % (BLHeli default 1148/1832 µs ÷ 8); ESC range calibration pending |
 | Arming, failsafe | ✅ | Verified on the bench: arm switch SF (latching), armed on a rising edge only (switch left on at boot or when the link comes back must be cycled first), refused if link quality is low, throttle is not low, or an accelerometer calibration is running or missing; disarmed on switch off or link timeout. Motor outputs do not depend on it yet |
 | Angle loop (quaternion error) | 📋 | |
 | Barometer + altitude hold | 📋 | Complementary filter baro / vertical acceleration |
@@ -194,8 +194,8 @@ Accelerometer offsets are deliberately **not** calibrated at boot: doing so woul
 
 ### Immediate next steps
 
-1. **Motor mapping test** with `ESC_Test()` (props off): motor position and spin direction for each pad.
-2. **Fast loop skeleton** in the ICM data-ready path at 8 kHz, with its CPU budget measured by the DWT cycle counter (also gives the real `dt`).
+1. **Fast loop skeleton** (bench test pending): runs at 8 kHz at the end of the ICM DMA interrupt; the DWT cycle counter gives the real `dt` and the CPU budget of the whole IMU + loop chain, printed once per second.
+2. **ESC range calibration:** uncalibrated ESCs saturate at ≈ 83 % and start at ≈ 15 %; radio-driven calibration mode written (disarmed, throttle high, SA+SD 2 s: motors pulse at 1 Hz as a props-on warning until throttle is lowered, then throttle stick passthrough to the ESCs; SA+SD or failsafe exits). Bench test pending, then re-measure the start threshold (spin directions ✅ recorded).
 3. **Gyro filtering:** PT1 / PT2 low-pass and software notch, tuned on bench vibration data.
 4. **Rate PID + Quad-X mixer** with desaturation; stop pulse on every output whenever `Security_IsArmed()` is false.
 5. **ESC output rate:** raise OneShot125 above 1 kHz, then DShot.
@@ -203,7 +203,7 @@ Accelerometer offsets are deliberately **not** calibrated at boot: doing so woul
 ### Known TODOs
 
 - **Motor cut on disarm:** the future rate loop / mixer must output the stop pulse whenever `Security_IsArmed()` is false.
-- **Motor mapping:** pad ↔ timer channel is confirmed (M1..M4 = PC6..PC9 = TIM8 CH1..CH4, M5..M7 = PA8..PA10 = TIM1, M8 = PB1 = TIM3); the motor position on each pad and the spin directions are still to check (see `esc_driver.c`).
+- **Motor mapping:** pad ↔ timer channel is confirmed (M1..M4 = PC6..PC9 = TIM8 CH1..CH4, M5..M7 = PA8..PA10 = TIM1, M8 = PB1 = TIM3), motor positions and spin directions verified on the bench, viewed from above with the camera at the front (M1 rear left CW, M2 front left CCW, M3 rear right CCW, M4 front right CW: quad-X props-out, see `esc_driver.c`). Uncalibrated ESCs only respond between ≈ 15 % and ≈ 83 % (BLHeli default min/max throttle): ESC range calibration still to do.
 - **ESC update rate:** OneShot125 runs at 1 kHz; raise it (up to ~3.9 kHz) or move to DShot once the 8 kHz rate loop is in place.
 - **ESC_M8 timer scale:** TIM3 is clocked from APB1, so its timer runs at 12 MHz instead of 24 MHz and its pulse values are half those of M1..M7.
 

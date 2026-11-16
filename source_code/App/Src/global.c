@@ -12,6 +12,7 @@ bool debug_init = true;
 bool debug_rc   = true;
 bool debug_imu  = true;
 bool debug_warn = true;
+bool debug_loop = true;
 
 /* Non utilisés pour l'instant (cf. global.h) */
 int16_t AccData[3]  = {0};
