@@ -3,10 +3,10 @@
 #include "clock.h"
 #include "gps.h"
 #include "log.h"
+#include "nmea.h"
 #include "stm32f4xx_ll_bus.h"
 #include "stm32f4xx_ll_gpio.h"
 #include "task.h"
-#include <stdlib.h>
 
 // LED d'état de la LithCore, anodes au 3V3 : allumées quand la broche est à 0.
 #define LED_BLUE_PORT GPIOC
@@ -23,29 +23,6 @@ static StackType_t blink_stack[BLINK_STACK];
 static StaticTask_t blink_tcb;
 static StackType_t gps_stack[GPS_STACK];
 static StaticTask_t gps_tcb;
-
-int nmea_checksum_ok(const char *line)
-{
-    int index = 0;
-    uint8_t checksum = 0;
-    if (line[0] == '$') {
-        index++;
-        while (line[index] != '*') {
-            checksum ^= line[index];
-            index++;
-        }
-
-        char hex_str[3] = {line[index + 1], line[index + 2], '\0'};
-        uint8_t expected = (uint8_t)strtol(hex_str, NULL, 16);
-        if (checksum == expected) {
-            return 1;
-        } else {
-            return 0;
-        }
-    } else {
-        return 0;
-    }
-}
 
 static void leds_init(void)
 {

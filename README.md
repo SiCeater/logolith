@@ -7,7 +7,8 @@ Branche `base` : point de départ minimal. FreeRTOS, horloge à 168 MHz sur le q
 ## Arborescence
 
 ```
-src/            code du firmware (main.c, clock.c)
+src/            code source du firmware (.c)
+inc/            en-têtes du firmware (.h)
 config/         FreeRTOSConfig.h
 linker/         plan mémoire (script de liens)
 cmake/          toolchain, dépendances, cibles de flash

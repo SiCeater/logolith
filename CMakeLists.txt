@@ -37,11 +37,12 @@ add_executable(logolith
     src/clock.c
     src/log.c
     src/gps.c
+    src/nmea.c
     ${cmsis_device_f4_SOURCE_DIR}/Source/Templates/system_stm32f4xx.c
     ${cmsis_device_f4_SOURCE_DIR}/Source/Templates/gcc/startup_stm32f405xx.s
 )
 
-target_include_directories(logolith PRIVATE src)
+target_include_directories(logolith PRIVATE inc)
 target_compile_options(logolith PRIVATE
     $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -Wshadow -Wconversion -Wno-sign-conversion>
 )
