@@ -3,9 +3,9 @@
 
 #include <stdint.h>
 
-/* Boucle rapide 8 kHz (squelette), voir fast_loop.c. */
+/* Boucle rapide à ICM42688_ODR_HZ (1 kHz, squelette), voir fast_loop.c. */
 
-/* dt réel de la dernière itération en secondes (~125,5 µs), mesuré au DWT. */
+/* dt réel de la dernière itération en secondes (~1,004 ms), mesuré au DWT. */
 extern volatile float fast_loop_dt;
 
 /* Active le compteur de cycles DWT. À appeler AVANT ICM42688_Init (qui lance

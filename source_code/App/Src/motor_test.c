@@ -20,7 +20,8 @@
  * M1 = ArG horaire, M2 = AvG anti-horaire, M3 = ArD anti-horaire, M4 = AvD horaire.
  * /!\ Se placer DERRIÈRE le drone (caméra dos à soi) pour le relevé : un premier
  * relevé fait face au drone était tourné de 180°.
- * Démarrage moteur à ~15 %, saturation à ~83 % (ESC non calibrés, cf. esc_driver.c).
+ * Avant calibration des ESC : démarrage ~15 %, saturation ~83 % ; après
+ * calibration (esc_calib.c), plage complète 0–100 %.
  *
  * Non bloquant : MotorTest_Process() est appelé dans la slow loop après
  * Security_Process(). Hors séquence, ce module n'écrit jamais dans les ESC.

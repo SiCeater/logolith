@@ -146,25 +146,27 @@ int main(void)
   /* USER CODE BEGIN 2 */
 
   /* ── Séquence de boot applicative (ordre important) ──────────────────────
-   * 1. ESC_Init        : impulsion d'ARRÊT sur M1..M4, en premier pour que les ESC reçoivent
-   *                      un signal valide (et s'arment, "bips") pendant le reste du boot.
-   *                      Ne fait jamais tourner un moteur.
+   * 1. ESC_Init        : TIM8 en one-pulse, sorties M1..M4 armées à l'ARRÊT, en premier.
+   *                      N'émet rien : les impulsions partent avec la fast loop (après
+   *                      ICM42688_Init), les ESC s'arment alors ("bips"). Ne fait jamais
+   *                      tourner un moteur.
    * 2. Remote_Init     : démarre la réception CRSF (DMA + IRQ IDLE USART2). Non bloquant :
    *                      ne fait PAS attendre la radio, les trames arrivent ensuite en tâche de fond.
    * 3. Config_Load     : lit la config sauvegardée (flash secteur 11) → g_config.
    *    FastLoop_Init   : compteur de cycles DWT, avant les premières IRQ DMA de l'ICM.
    * 4. ICM42688_Init   : config IMU + self-test + calibration GYRO automatique (BLOQUANT
-   *                      quelques secondes, drone IMMOBILE requis), puis lance la lecture DMA 8 kHz.
+   *                      quelques secondes, drone IMMOBILE requis), puis lance la lecture DMA (ICM42688_ODR_HZ = 1 kHz).
    * 5. AccelCal_Init   : applique la calibration ACCEL sauvegardée (ne lance aucune calibration).
    * 6. Boucle          : slow loop ~500 Hz (RC, armement sur SF, test moteurs par SD,
    *                      calibration accel par SA+SD gaz bas, calibration ESC par SA+SD
    *                      gaz haut), puis prints debug dans le temps libre.
-   *    La boucle rapide 8 kHz (fast_loop.c) tourne, elle, dans l'IRQ DMA de l'ICM.
+   *    La boucle rapide 1 kHz (fast_loop.c) tourne, elle, dans l'IRQ DMA de l'ICM, et
+   *    émet l'impulsion ESC à chaque itération.
    *
    * Aucune calibration ESC au boot : elle se fait volontairement à la radio, HÉLICES
    * DÉMONTÉES (esc_calib.c). */
 
-  ESC_Init();             /* impulsion d'arrêt, sans risque */
+  ESC_Init();             /* sorties armées à l'arrêt, n'émet rien, sans risque */
 
   Remote_Init();
 
@@ -186,7 +188,7 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 
-    /* Slow loop provisoire ~500 Hz. La fast loop / PID tournera à 8 kHz dans
+    /* Slow loop provisoire ~500 Hz. La fast loop / PID tourne à 1 kHz dans
      * l'ISR, cadencée par le DRDY de l'ICM. */
     float slow_dt;
     if (period_elapsed(&slow_last_ms, SLOW_LOOP_PERIOD_MS, &slow_dt)) {

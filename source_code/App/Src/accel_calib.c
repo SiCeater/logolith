@@ -45,13 +45,13 @@
  * plat sur une table), pas des positions approximatives tenues à la main.
  *
  * ═══════════════════════════════════════════════════════════════════════════
- * ARCHITECTURE : ISR 8 kHz ↔ BOUCLE PRINCIPALE ~500 Hz
+ * ARCHITECTURE : ISR À L'ODR IMU (1 kHz) ↔ BOUCLE PRINCIPALE ~500 Hz
  * ═══════════════════════════════════════════════════════════════════════════
  *
- *   ISR DMA ICM (8 kHz)                       Boucle principale (~500 Hz)
+ *   ISR DMA ICM (1 kHz)                       Boucle principale (~500 Hz)
  *   ───────────────────                       ───────────────────────────
  *   AccelCal_Feed()                           AccelCal_Process()
- *     accumule 800 échantillons                 lit la radio (trigger)
+ *     accumule ACAL_WIN_SAMPLES éch.            lit la radio (trigger)
  *     (= 1 fenêtre de 100 ms) :                 si win_ready : copie `win`,
  *     somme + min/max accel et gyro             remet win_ready = false,
  *     → publie `win`, win_ready = true  ──────►  machine d'état (faces, capture)
@@ -60,8 +60,8 @@
  *     a_cal = T·(raw − bias) avec `active`
  *
  * Pourquoi accumuler dans l'ISR : la boucle principale ne voit pas chaque
- * échantillon (8 kHz contre 500 Hz). Dans l'ISR, on prend les 8000 éch./s,
- * pour un coût de quelques additions et comparaisons.
+ * échantillon (ODR IMU contre ~500 Hz, avec de la gigue). Dans l'ISR, on les
+ * prend tous, pour un coût de quelques additions et comparaisons.
  *
  * Règles de partage (ne pas casser) :
  *   - `win` n'est écrit par l'ISR QUE si win_ready == false, et lu par la
@@ -98,7 +98,7 @@
 #include <string.h>
 
 /* ═══════════════════════════════════════════════════════════════════════════
- * Calibration active (lue par l'ISR à 8 kHz, mise à jour IRQ coupées)
+ * Calibration active (lue par l'ISR à chaque échantillon, mise à jour IRQ coupées)
  * ═══════════════════════════════════════════════════════════════════════════ */
 static accel_cal_t   active;                /* copie RAM utilisée par AccelCal_Apply */
 static volatile bool active_valid = false;  /* false → échelle nominale, pas de correction */
@@ -108,7 +108,8 @@ static volatile bool active_valid = false;  /* false → échelle nominale, pas 
  * ═══════════════════════════════════════════════════════════════════════════ */
 
 /* Accumulateur de la fenêtre en cours (propriété de l'ISR).
- * sum : 800 éch. × 32767 max = 26 M → tient dans un int32 sans risque. */
+ * sum : ACAL_WIN_SAMPLES × 32767 max (3,3 M à 1 kHz, 26 M même à 8 kHz)
+ * → tient dans un int32 sans risque. */
 typedef struct {
     int32_t  sum[3];
     int16_t  amin[3], amax[3], gmin[3], gmax[3];
@@ -131,14 +132,14 @@ static win_t             win;            /* dernière fenêtre publiée */
 static volatile bool     feeding   = false;  /* true = calibration en cours, l'ISR accumule */
 static volatile bool     win_ready = false;  /* "boîte aux lettres" ISR → boucle */
 /* Nb total d'échantillons reçus → fréquence IMU réelle. On compte les
- * échantillons et non les fenêtres : compter des fenêtres de 800 (100 ms)
- * donnait une résolution de 400 Hz sur 2 s, et la 20e fenêtre finissant
- * pile vers t = 2000 ms, on en lisait souvent 19 → "7600 Hz" à tort. */
+ * échantillons et non les fenêtres : compter des fenêtres de 100 ms donnait
+ * une résolution de 5 % sur 2 s, et la 20e fenêtre finissant pile vers
+ * t = 2000 ms, on en lisait souvent 19 → "7600 Hz" au lieu de ~7966 à 8 kHz. */
 static volatile uint32_t sample_count = 0;
 
-/* Appelée par l'ISR DMA de l'ICM à chaque échantillon (8 kHz). Doit rester
+/* Appelée par l'ISR DMA de l'ICM à chaque échantillon (à l'ODR). Doit rester
  * très courte : pas de flottant dans le chemin courant, une seule division
- * par fenêtre (tous les 800 échantillons). */
+ * par fenêtre (tous les ACAL_WIN_SAMPLES échantillons). */
 void AccelCal_Feed(const int16_t a[3], const int16_t g[3])
 {
     if (!feeding) return;      /* hors calibration : coût = un test */
@@ -558,9 +559,9 @@ void AccelCal_Process(void)
 
         if (!rate_printed && (now - t_start) >= 2000U) {
             /* Diagnostic gratuit : fréquence réelle du DRDY de l'ICM, mesurée
-             * en comptant les échantillons sur ~2 s. Attendu : 8000 Hz, à
-             * l'oscillateur interne de l'ICM près (quelques dizaines de Hz) et
-             * ±~4 Hz d'incertitude (t_start au ms près). Une valeur nettement
+             * en comptant les échantillons sur ~2 s. Attendu : ICM42688_ODR_HZ
+             * (1000 Hz) à l'oscillateur interne de l'ICM près (~996 Hz mesurés,
+             * ±1,5 % garanti) et ±~1 Hz d'incertitude (t_start au ms près). Une valeur nettement
              * plus basse = interruptions perdues (cf. INT_CONFIG1 dans le driver ICM). */
             uint32_t hz = ((sample_count - smp_start) * 1000U) / (now - t_start);
             cal_print("\n\rACAL : frequence IMU mesuree = "); cal_print_i32((int32_t)hz); cal_print(" Hz");

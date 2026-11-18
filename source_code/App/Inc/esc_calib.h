@@ -13,6 +13,9 @@
 #define ESCCAL_EXIT_HOLD_MS     200U    /* SA+SD tenus pour sortir (anti-parasite) */
 #define ESCCAL_THROTTLE_HIGH    0.95f   /* gaz "en haut" pour entrer */
 #define ESCCAL_THROTTLE_LOW     0.05f   /* gaz "en bas" pour passer en manche direct */
+#define ESCCAL_PULSE_CMD        150U    /* 5 % : à-coup d'avertissement. Suffit avec des ESC
+                                         * calibrés ; /!\ des ESC NON calibrés (démarrage ~15 %)
+                                         * ne bougeront pas : l'avertissement est alors muet. */
 #define ESCCAL_BLINK_HALF_MS    500U    /* clignotement moteurs 1 Hz : 500 ms on / 500 ms off */
 
 /* À appeler dans la slow loop, après Security_Process(). Non bloquant. */

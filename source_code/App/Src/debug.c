@@ -7,7 +7,7 @@
  * de transmission vide). Simple et fiable, mais BLOQUANT : à 921600 bauds, un
  * caractère prend ~11 µs, soit ~0,5 ms pour une ligne de 50 caractères. Appelé depuis une
  * ISR, ça décale toutes les autres interruptions de même priorité ou moins
- * prioritaires (une ligne IMU ~0,5 ms = 4 périodes de la boucle 8 kHz). Règle :
+ * prioritaires (une ligne IMU ~0,5 ms = la moitié d'une période de la boucle 1 kHz). Règle :
  * les prints périodiques (debug_imu, debug_rc) se font depuis la boucle
  * principale, jamais depuis une ISR : l'ISR ne fait que poser un instantané.
  *

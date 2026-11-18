@@ -1,7 +1,7 @@
 /**
  * icm42688_driver.c
  * Driver LL ICM-42688-P — SPI1 + DMA2 — STM32F405
- * Gyro and accel, fast loop 8 kHz, Low-Noise mode, AAF enabled
+ * Gyro et accel à ICM42688_ODR_HZ (1 kHz), mode Low-Noise, AAF actif
  * 
  * Architecture multi-banques (BANK 0/1/2/4) — accès via REG_BANK_SEL
  * Config optimisée pour drone cinelifter F380 (stabilité prioritaire)
@@ -18,7 +18,7 @@
  * ═══════════════════════════════════════════════════════════════════════════ */
 icm42688_data_t icm42688 = {0};
 
-static volatile bool icm_ready = false;   /* true après init complète, prêt pour fast loop 8 kHz */
+static volatile bool icm_ready = false;   /* true après init complète, prêt pour la fast loop */
 /* true entre le lancement d'une lecture DMA (CS bas) et son callback de fin (CS haut).
  * Empêche de relancer une lecture alors que la précédente n'est pas terminée :
  * sans CS remonté entre les deux, l'ICM verrait UNE seule transaction continue et
@@ -526,97 +526,104 @@ void ICM42688_Init(void)
     ICM42688_SelfTest();
     
     /* ══════════════════════════════════════════════════════════════════════
-     * ÉTAPE 4 : Configuration GYRO_CONFIG0 — ±2000 dps, ODR 8 kHz
+     * ÉTAPE 4 : Configuration GYRO_CONFIG0 — ±2000 dps, ODR = ICM42688_ODR_HZ
      * ══════════════════════════════════════════════════════════════════════ */
     /*
      * GYRO_CONFIG0 (BANK 0, 0x4F) :
      * - GYRO_FS_SEL = 0b000 → ±2000 dps (16.4 LSB/dps)
-     * - GYRO_ODR    = 0b0011 → 8 kHz
+     * - GYRO_ODR    = ICM42688_ODR_SEL_GYRO (0b0110 → 1 kHz, voir icm42688_driver.h)
      * 
      * Choix ±2000 dps : vitesses angulaires max ~500-700 dps en vol stable,
      * marge confortable + meilleure résolution que ±4000 dps.
-     * ODR 8 kHz
      */
-    cfg = ICM42688_GYRO_FS_SEL_2000DPS | ICM42688_GYRO_ODR_8kHz;
+    cfg = ICM42688_GYRO_FS_SEL_2000DPS | ICM42688_ODR_SEL_GYRO;
     spi_write_reg(ICM42688_BANK_SEL_0, ICM42688_REG_GYRO_CONFIG0, cfg);
     LL_mDelay(10);
     
     cfg = spi_read_reg(ICM42688_BANK_SEL_0, ICM42688_REG_GYRO_CONFIG0);
-    if (cfg != (ICM42688_GYRO_FS_SEL_2000DPS | ICM42688_GYRO_ODR_8kHz)) {
+    if (cfg != (ICM42688_GYRO_FS_SEL_2000DPS | ICM42688_ODR_SEL_GYRO)) {
         if (debug_init)
             print_to_console("\n\rREG_GYRO_CONFIG0 MISMATCH", sizeof("\n\rREG_GYRO_CONFIG0 MISMATCH"));
         while(1);
     }
     else {
         if (debug_init)
-            print_to_console("\n\rICM-42688-P : REG_GYRO_CONFIG0 OK (+/-2000dps, 8kHz)", 
-                           sizeof("\n\rICM-42688-P : REG_GYRO_CONFIG0 OK (+/-2000dps, 8kHz)"));
+            print_to_console("\n\rICM-42688-P : REG_GYRO_CONFIG0 OK (+/-2000dps, 1kHz)", 
+                           sizeof("\n\rICM-42688-P : REG_GYRO_CONFIG0 OK (+/-2000dps, 1kHz)"));
     }
     
     /* ══════════════════════════════════════════════════════════════════════
-     * ÉTAPE 5 : Configuration ACCEL_CONFIG0 — ±16g, ODR 8 kHz
+     * ÉTAPE 5 : Configuration ACCEL_CONFIG0 — ±16g, ODR = ICM42688_ODR_HZ
      * ══════════════════════════════════════════════════════════════════════ */
     /*
      * ACCEL_CONFIG0 (BANK 0, 0x50) :
      * - ACCEL_FS_SEL = 0b000 → ±16g (2048 LSB/g)
-     * - ACCEL_ODR    = 0b0011 → 8 kHz (aligné sur le gyro : UI_DRDY et donc la
-     *                  fast loop tombent à 8 kHz sans dépendre de quel ODR pilote le DRDY.
+     * - ACCEL_ODR    = ICM42688_ODR_SEL_ACCEL (aligné sur le gyro : UI_DRDY et donc
+     *                  la fast loop tombent à l'ODR sans dépendre de quel capteur pilote le DRDY.
      *                  Le filtrage accel reste fixé par l'AAF accel ~42 Hz, BANK 2)
      * 
      * Choix ±16g : manoeuvres agressives peuvent atteindre 6-8g,
      * ±16g évite saturation (plus de marge que ±8g du MPU6000).
      */
-    cfg = ICM42688_ACCEL_FS_SEL_16G | ICM42688_ACCEL_ODR_8kHz;
+    cfg = ICM42688_ACCEL_FS_SEL_16G | ICM42688_ODR_SEL_ACCEL;
     spi_write_reg(ICM42688_BANK_SEL_0, ICM42688_REG_ACCEL_CONFIG0, cfg);
     LL_mDelay(10);
     
     cfg = spi_read_reg(ICM42688_BANK_SEL_0, ICM42688_REG_ACCEL_CONFIG0);
-    if (cfg != (ICM42688_ACCEL_FS_SEL_16G | ICM42688_ACCEL_ODR_8kHz)) {
+    if (cfg != (ICM42688_ACCEL_FS_SEL_16G | ICM42688_ODR_SEL_ACCEL)) {
         if (debug_init)
             print_to_console("\n\rREG_ACCEL_CONFIG0 MISMATCH", sizeof("\n\rREG_ACCEL_CONFIG0 MISMATCH"));
         while(1);
     }
     else {
         if (debug_init)
-            print_to_console("\n\rICM-42688-P : REG_ACCEL_CONFIG0 OK (+/-16g, 8kHz)", 
-                           sizeof("\n\rICM-42688-P : REG_ACCEL_CONFIG0 OK (+/-16g, 8kHz)"));
+            print_to_console("\n\rICM-42688-P : REG_ACCEL_CONFIG0 OK (+/-16g, 1kHz)", 
+                           sizeof("\n\rICM-42688-P : REG_ACCEL_CONFIG0 OK (+/-16g, 1kHz)"));
     }
     
     /* ══════════════════════════════════════════════════════════════════════
      * ÉTAPE 6 : Configuration AAF (Anti-Aliasing Filter) gyro uniquement — BANK 1
      * ══════════════════════════════════════════════════════════════════════ */
     /*
-     * L'AAF est un filtre anti repliement de spectre (anti-aliasing filter).
-     * Registres GYRO_CONFIG_STATIC2/3/4/5 (BANK 1) : AAF_DIS, NF_DIS, AAF_DELT, AAF_DELTSQR, AAF_BITSHIFT.
-     * 
-     * Configuration recommandée TDK pour ODR 8kHz, notch ~200Hz (fondamentale moteur) :
-     * - AAF_DELT = 63 (0x3F) → DELT[7:0]
-     * - AAF_DELTSQR = 3969 (0x0F81) → DELTSQR[11:8] = 0x0F, DELTSQR[7:0] = 0x81
-     * - AAF_BITSHIFT = 8 (0x08) → bits [7:4] = 8, bits [3:0] = 0
-     * 
-     * Ces valeurs sont issues de l'application note TDK "Gyroscope AAF Configuration".
-     * Valeurs TDK app note AN-000157 pour f_notch = 200 Hz, ODR = 8 kHz : 
-     * Pour cinelifter 940 Kv @ 15.5V : f_motor ≈ 130-200 Hz (2e harmonique 260-400 Hz) et blade passage (tri-blade × RPM) : 400–600 Hz (3 × f_motor).
-     * Filtrage cascade prevu :
-     * - AAF 200 Hz (hardware, fondamentale)
-     * - Notch SW 400 Hz (software, blade passage)
-     * - PT2 ~100 Hz (software, global LPF)
-     * Avec 9050 tri-blade, la blade passage @ 400–600 Hz est brutale — l'AAF seul ne suffit pas, il faut le notch SW
+     * AAF GYRO (anti-aliasing filter), BANK 1, registres GYRO_CONFIG_STATIC3/4/5.
      *
-     * Note : l'AAF est activé automatiquement en mode Low-Noise si ces registres
-     * sont non-nuls. Pas de bit enable séparé.
+     * Place dans la chaîne interne (datasheet fig. 9) :
+     *   ADC → décimation 32 kHz → notch d'usine → AAF → offset utilisateur → UI filter → ODR
+     * L'AAF tourne donc à 32 kHz, AVANT la décimation vers l'ODR : c'est lui, avec
+     * le UI filter, qui protège du repliement quand la puce ne garde qu'un
+     * échantillon sur 32 (ODR 1 kHz → Nyquist 500 Hz).
+     *
+     * Choix : 3 dB à 213 Hz (table §5.3 : DELT = 5, DELTSQR = 25, BITSHIFT = 10).
+     *   - Bande utile du contrôle : quelques dizaines de Hz (coupure de la boucle
+     *     ~5–15 Hz sur un 9") → 213 Hz laisse de la marge de phase.
+     *   - Atténuation à Nyquist (500 Hz) : ≈ −15 dB SI l'AAF est d'ordre 2 (l'ordre
+     *     n'est pas donné par la datasheet, À VÉRIFIER) ; ≈ −29 dB à 1,14 kHz,
+     *     d'où la 9e harmonique de passage de pales qui se replierait à ~137 Hz.
+     *   - Les harmoniques moteur dans la bande (1×, 3× ≈ 126 / 379 Hz à 4S plein
+     *     gaz, estimation) ne sont PAS retirées ici : notchs logiciels plus tard.
+     * Ancienne config (8 kHz) : DELT 21 / DELTSQR 440 / BITSHIFT 6 = 997 Hz,
+     * inutilisable à 1 kHz (au-delà de Nyquist).
+     *
+     * Le notch d'usine (GYRO_NF, 1–3 kHz) vise le pic de résonance du MEMS, pas
+     * les moteurs : on le laisse tel quel. Ne JAMAIS écrire 0x00 dans
+     * GYRO_CONFIG_STATIC2 (désactiverait AAF et notch). L'AAF est actif en mode
+     * Low-Noise dès que ces registres sont non nuls (pas de bit enable séparé).
      */
+    spi_write_reg(ICM42688_BANK_SEL_1, ICM42688_REG_GYRO_CONFIG_STATIC3_B1, 0x05U);  // GYRO_AAF_DELT = 5
+    LL_mDelay(10);
+    spi_write_reg(ICM42688_BANK_SEL_1, ICM42688_REG_GYRO_CONFIG_STATIC4_B1, 0x19U);  // GYRO_AAF_DELTSQR[7:0] = 25
+    LL_mDelay(10);
+    spi_write_reg(ICM42688_BANK_SEL_1, ICM42688_REG_GYRO_CONFIG_STATIC5_B1, 0xA0U);  // BITSHIFT=10 | DELTSQR[11:8]=0 → 213 Hz
+    LL_mDelay(10);
+    if (spi_read_reg(ICM42688_BANK_SEL_1, ICM42688_REG_GYRO_CONFIG_STATIC3_B1) != 0x05U ||
+        spi_read_reg(ICM42688_BANK_SEL_1, ICM42688_REG_GYRO_CONFIG_STATIC4_B1) != 0x19U ||
+        spi_read_reg(ICM42688_BANK_SEL_1, ICM42688_REG_GYRO_CONFIG_STATIC5_B1) != 0xA0U) {
+        if (debug_init)
+            print_to_console("\n\rREG_GYRO_CONFIG_STATIC3/4/5 (AAF 213 Hz) MISMATCH",
+                           sizeof("\n\rREG_GYRO_CONFIG_STATIC3/4/5 (AAF 213 Hz) MISMATCH"));
+        while(1);
+    }
 
-    // spi_write_reg(ICM42688_BANK_SEL_1, ICM42688_REG_GYRO_CONFIG_STATIC2_B1, 0xA0U);  // GYRO_AAF_DIS=0, GYRO_NF_DIS=0, bits 0 et 1 (les deux ENABLED), valeur de reset = 0xA0 (bits 7 et 5) donc AAF enabled, NF enabled at reset.
-    // LL_mDelay(10);
-
-    spi_write_reg(ICM42688_BANK_SEL_1, ICM42688_REG_GYRO_CONFIG_STATIC3_B1, 0x15U);  // GYRO_AAF_DELT = 21
-    LL_mDelay(10);
-    spi_write_reg(ICM42688_BANK_SEL_1, ICM42688_REG_GYRO_CONFIG_STATIC4_B1, 0xB8U);  // GYRO_AAF_DELTSQR[7:0] = 440 & 0xFF
-    LL_mDelay(10);
-    spi_write_reg(ICM42688_BANK_SEL_1, ICM42688_REG_GYRO_CONFIG_STATIC5_B1, 0x61U);  // BITSHIFT=6 | DELTSQR[11:8]=1  → BW ≈ 997 Hz
-    LL_mDelay(10);
-    
     /* Vérification lecture (BANK 1) que le premier registre est correct */
     cfg = spi_read_reg(ICM42688_BANK_SEL_1, ICM42688_REG_GYRO_CONFIG_STATIC2_B1);
     if (cfg != 0xA0U) {
@@ -627,8 +634,8 @@ void ICM42688_Init(void)
     }
     else {
         if (debug_init)
-            print_to_console("\n\rICM-42688-P : AAF gyro config OK (BANK 1, AAF GYRO enabled)", 
-                           sizeof("\n\rICM-42688-P : AAF gyro config OK (BANK 1, AAF GYRO enabled)"));
+            print_to_console("\n\rICM-42688-P : AAF gyro config OK (BANK 1, 213 Hz)", 
+                           sizeof("\n\rICM-42688-P : AAF gyro config OK (BANK 1, 213 Hz)"));
     }
 
     /* AAF accel (BANK 2) — ACTIVÉ à ~42 Hz : c'est lui qui fixe la bande passante accel */
@@ -676,15 +683,29 @@ void ICM42688_Init(void)
     }
     
     /*
-     * GYRO_ACCEL_CONFIG0 (BANK 0, 0x52) :
-     * - ACCEL_UI_FILT_BW=6 (ODR/20 = 400 Hz @ 8 kHz, l'AAF accel 42 Hz domine) | GYRO_UI_FILT_BW=0 => 0x60
+     * GYRO_ACCEL_CONFIG0 (BANK 0, 0x52) : bande passante des UI filters.
+     * Valeurs à ODR 1 kHz (datasheet §5.5, tables 3 dB / retard de groupe à DC) :
+     *
+     *   GYRO, 2e ordre (GYRO_CONFIG1)   3 dB      retard
+     *     BW 0  (ODR/2)  ← choisi        493 Hz    0,7 ms
+     *     BW 15 (basse latence)        2096 Hz    0,2 ms   (plus de filtrage avant décimation)
+     *     BW 14                         262 Hz    1,5 ms
+     *     BW 1  (ODR/4)                 231 Hz    2,1 ms
+     *
+     * BW 0 : +0,5 ms par rapport à BW 15 (≈ 1,8° de phase à 10 Hz, 2,7° à 15 Hz)
+     * pour ~−3 dB de plus à Nyquist et ~−12 dB vers 1 kHz, en plus de l'AAF. Les
+     * raies de passage de pales repliées (9×, 12× f_rot) étant le vrai risque,
+     * on paie ce demi-milliseconde. À revoir avec les spectres blackbox.
+     *
+     *   ACCEL : BW 0 (ODR/2, 493 Hz) → l'AAF accel à 42 Hz reste le seul limiteur,
+     *   comme à 8 kHz. (ODR/20 ferait 48 Hz / 6,1 ms de retard à 1 kHz.)
      */
-    cfg = ICM42688_ACCEL_UI_FILT_BW_ODR_DIV_20 | ICM42688_GYRO_UI_FILT_BW_0;
+    cfg = ICM42688_ACCEL_UI_FILT_BW_ODR_DIV_2 | ICM42688_GYRO_UI_FILT_BW_0;
     spi_write_reg(ICM42688_BANK_SEL_0, ICM42688_REG_GYRO_ACCEL_CONFIG0, cfg);
     LL_mDelay(10);
     
     cfg = spi_read_reg(ICM42688_BANK_SEL_0, ICM42688_REG_GYRO_ACCEL_CONFIG0);
-    if (cfg != (ICM42688_ACCEL_UI_FILT_BW_ODR_DIV_20 | ICM42688_GYRO_UI_FILT_BW_0)) {
+    if (cfg != (ICM42688_ACCEL_UI_FILT_BW_ODR_DIV_2 | ICM42688_GYRO_UI_FILT_BW_0)) {
         if (debug_init)
             print_to_console("\n\rREG_GYRO_ACCEL_CONFIG0 MISMATCH", 
                            sizeof("\n\rREG_GYRO_ACCEL_CONFIG0 MISMATCH"));
@@ -692,8 +713,8 @@ void ICM42688_Init(void)
     }
     else {
         if (debug_init)
-            print_to_console("\n\rICM-42688-P : REG_GYRO_ACCEL_CONFIG0 OK (accel UI filt ODR/20, gyro UI filt 0)", 
-                           sizeof("\n\rICM-42688-P : REG_GYRO_ACCEL_CONFIG0 OK (accel UI filt ODR/20, gyro UI filt 0)"));
+            print_to_console("\n\rICM-42688-P : REG_GYRO_ACCEL_CONFIG0 OK (accel UI filt ODR/2, gyro UI filt ODR/2)", 
+                           sizeof("\n\rICM-42688-P : REG_GYRO_ACCEL_CONFIG0 OK (accel UI filt ODR/2, gyro UI filt ODR/2)"));
     }
     
     /*
@@ -753,7 +774,8 @@ void ICM42688_Init(void)
      * INT_CONFIG1 (BANK 0, 0x64) :
      * - INT_ASYNC_RESET       = 0 : OBLIGATOIRE, datasheet §12.6 (défaut = 1,
      *                               "user should change to 0 for proper INT1/INT2 operation")
-     * - INT_TPULSE_DURATION   = 1 : pulse 8 µs   (requis si ODR >= 4 kHz, gyro à 8 kHz)
+     * - INT_TPULSE_DURATION   = 1 : pulse 8 µs   (obligatoire si ODR >= 4 kHz, gardé à 1 kHz :
+     *                               un front court suffit à l'EXTI)
      * - INT_TDEASSERT_DISABLE = 1 : pas de 100 µs de dé-assertion (idem)
      */
     cfg = ICM42688_INT_CONFIG1_TPULSE_8US | ICM42688_INT_CONFIG1_TDEASSERT_DIS;
@@ -851,8 +873,7 @@ void ICM42688_Init(void)
      * (INT_SOURCE0 = celles d'INT1, non câblée ici) :
      * - UI_DRDY_INT2_EN = 1 (router UI Data Ready → INT2 pin)
      * 
-     * UI_DRDY à 8 kHz (gyro et accel tous deux à ODR 8 kHz) → fast loop / PID à 8 kHz.
-     * À 8 kHz (période 125 µs), le pulse 8 µs + TDEASSERT_DIS de INT_CONFIG1 sont obligatoires.
+     * UI_DRDY à ICM42688_ODR_HZ (gyro et accel à la même ODR) → fast loop / PID.
      */
     cfg = ICM42688_INT_SOURCE3_UI_DRDY_INT2_EN;
     spi_write_reg(ICM42688_BANK_SEL_0, ICM42688_REG_INT_SOURCE3, cfg);
@@ -871,8 +892,8 @@ void ICM42688_Init(void)
     }
 
     if (debug_init)
-        print_to_console("\n\rICM-42688-P : Init complete, ready for fast loop 8kHz\n\r", 
-                       sizeof("\n\rICM-42688-P : Init complete, ready for fast loop 8kHz\n\r"));
+        print_to_console("\n\rICM-42688-P : Init complete, ready for fast loop 1kHz\n\r", 
+                       sizeof("\n\rICM-42688-P : Init complete, ready for fast loop 1kHz\n\r"));
 
 
     LL_EXTI_ClearFlag_0_31(LL_EXTI_LINE_4);
@@ -935,7 +956,7 @@ void ICM42688_DMA_RX_Complete_Callback(void)
 {
     /*
      * Callback Transfer Complete DMA RX (Stream0).
-     * Appelé depuis DMA2_Stream0_IRQHandler quand les 13 octets sont reçus (8 kHz).
+     * Appelé depuis DMA2_Stream0_IRQHandler quand les 13 octets sont reçus (à l'ODR).
      * 
      * Séquence :
      * 1. Désactiver DMA requests SPI
@@ -1092,7 +1113,7 @@ void ICM42688_Debug_Process(void)
  * (print bloquant ~0,5 ms dans le callback), un DRDY relançait alors une lecture
  * pendant que la précédente n'était pas finie (CS toujours bas) → échantillons
  * corrompus, y compris ceux fournis à la calibration accel.
- * Rançon de la même priorité : si un callback dure plus de 125 µs, les DRDY sont
+ * Rançon de la même priorité : si un callback dure plus d'une période, les DRDY sont
  * fusionnés (il ne reste qu'un seul "pending") → échantillons PERDUS, mais jamais
  * faux. C'est pour ça que le print debug_imu a été sorti de l'ISR (instantané +
  * ICM42688_Debug_Process dans la boucle principale).
@@ -1101,7 +1122,7 @@ void ICM42688_Debug_Process(void)
 void ICM42688_EXTI4_Callback(void)
 {
     if (!icm_ready) return;
-    /* Garde-fou : une lecture SPI dure ~5 µs et le DRDY revient toutes les 125 µs.
+    /* Garde-fou : une lecture SPI dure ~5 µs et le DRDY revient toutes les 1000 µs.
      * Grâce aux priorités égales, si dma_busy est encore vrai ici, ce n'est pas une
      * lecture "en cours" mais une lecture PERDUE (erreur DMA, TC jamais reçu).
      * On ne la saute pas, sinon l'IMU resterait bloquée pour toujours : on remonte CS
@@ -1113,7 +1134,7 @@ void ICM42688_EXTI4_Callback(void)
         icm42688_dma_lost++;
     }
     /*
-     * INT2 rising edge @ 8 kHz (UI_DRDY).
+     * INT2 rising edge à l'ODR (UI_DRDY).
      * Déclenche immédiatement la lecture DMA.
      */
     ICM42688_Start_DMA_Read();

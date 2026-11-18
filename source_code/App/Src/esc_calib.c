@@ -18,7 +18,7 @@
  * ── Procédure (batterie DÉBRANCHÉE, FC alimenté en USB) ─────────────────
  *   1. Désarmé, gaz EN HAUT, SA + SD tenus 2 s → mode calibration (LED rouge).
  *   2. AVERTISSEMENT : tant que le manche des gaz n'est pas redescendu, les
- *      4 moteurs "clignotent" à 1 Hz entre arrêt et ESC_CMD_START (~15 %).
+ *      4 moteurs "clignotent" à 1 Hz entre arrêt et ESCCAL_PULSE_CMD (5 %).
  *      Batterie débranchée, il ne se passe rien. Si au contraire la batterie
  *      est branchée (et des hélices montées !), les moteurs donnent des à-coups
  *      bien audibles : on sait qu'on est entré dans ce mode par erreur, on en
@@ -28,7 +28,8 @@
  *   4. Remonter les gaz à fond, BRANCHER LA BATTERIE, attendre les bips
  *      "plein gaz enregistré", redescendre les gaz, attendre les bips de fin.
  *   5. SA + SD → sortie du mode : impulsion d'arrêt sur les 4 moteurs.
- * Ensuite : remesurer le seuil de démarrage (ESC_CMD_START) avec motor_test.
+ * Validé au banc sur Aerolith : après calibration, les moteurs répondent sur
+ * toute la plage 0–100 %.
  *
  * ── Sécurités ────────────────────────────────────────────────────────────
  *   - entrée seulement désarmé, lien radio sain, sans calibration accel en
@@ -60,7 +61,7 @@ typedef enum {
 
 static esccal_state_t state = ESCCAL_IDLE;
 static uint32_t       t_blink;              /* get_ms() du dernier basculement */
-static bool           blink_on;             /* moteurs à ESC_CMD_START (true) ou arrêt */
+static bool           blink_on;             /* moteurs à ESCCAL_PULSE_CMD (true) ou arrêt */
 
 /* Suivi de l'appui SA + SD (entrée et sortie).
  * combo_rearmed démarre à false : SA + SD tenus au boot ne déclenchent rien
@@ -123,7 +124,7 @@ void EscCal_Process(void)
                      "\n\r         baisser les gaz pour passer en manche direct. SA+SD = sortie.");
             R_LED_On();
             blink_on = true;
-            set_all(ESC_CMD_START);
+            set_all(ESCCAL_PULSE_CMD);
             t_blink = now;
             state   = ESCCAL_WARN;
         }
@@ -142,7 +143,7 @@ void EscCal_Process(void)
         }
         if ((now - t_blink) >= ESCCAL_BLINK_HALF_MS) {
             blink_on = !blink_on;
-            set_all(blink_on ? ESC_CMD_START : 0U);
+            set_all(blink_on ? ESCCAL_PULSE_CMD : 0U);
             t_blink = now;
         }
         break;

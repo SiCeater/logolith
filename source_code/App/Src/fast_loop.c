@@ -1,21 +1,24 @@
 /**
  * fast_loop.c
- * Boucle rapide à 8 kHz (squelette) + mesure de son budget CPU.
+ * Boucle rapide à ICM42688_ODR_HZ (1 kHz) + mesure de son budget CPU.
  *
  * ── Où elle tourne ────────────────────────────────────────────────────────
  * FastLoop_Run() est appelée à la fin de l'IRQ DMA2_Stream0 (fin de lecture SPI
  * de l'ICM), donc une fois par échantillon IMU, juste après la conversion et la
  * calibration des données (icm42688.gx…). Priorité NVIC 1, la plus haute du
  * firmware : rien ne la préempte sauf EXTI4 au même niveau, qui attend.
- * C'est ici que viendront filtres gyro, PID rate et mixeur.
+ * C'est ici que viendront filtres gyro, PID rate et mixeur. La sortie ESC est
+ * déclenchée en FIN d'itération (ESC_Update) : l'impulsion OneShot125 part
+ * quelques µs après le calcul, avec un retard fixe (voir esc_driver.c).
  *
  * ── Mesure avec le compteur de cycles DWT ────────────────────────────────
  * DWT->CYCCNT compte les cycles CPU (168 MHz → 5,95 ns), 32 bits, reboucle
  * toutes les ~25,6 s ; les différences non signées restent justes tant qu'un
  * intervalle mesuré fait moins de 25 s.
  *   - période  = écart entre deux entrées dans l'IRQ → dt RÉEL de la boucle
- *                (l'ODR de l'ICM n'est pas exactement 8000 Hz : ~7966 Hz
- *                mesurés, et ça dérive avec la température) ;
+ *                (l'ODR de l'ICM n'est pas exactement 1000 Hz : ~996 Hz
+ *                attendus d'après les 7967 Hz mesurés à 8 kHz, ±1,5 %
+ *                garanti, et ça dérive avec la température) ;
  *   - exécution = de l'entrée dans l'IRQ (t_entry) à la fin de FastLoop_Run :
  *                parsing SPI, conversion, calibration accel, instantané debug
  *                ET boucle rapide. Ne compte pas l'IRQ EXTI4 (relance du DMA,
@@ -29,13 +32,15 @@
 #include "main.h"      /* CMSIS : DWT, CoreDebug */
 #include "global.h"
 #include "debug.h"
+#include "icm42688_driver.h"   /* ICM42688_ODR_HZ */
+#include "esc_driver.h"        /* ESC_Update */
 #include <string.h>
 
 #define CPU_HZ          168000000UL
-#define FL_STATS_N      8000U          /* ~1 s à 8 kHz */
+#define FL_STATS_N      ICM42688_ODR_HZ   /* ~1 s de stats */
 
 /* dt réel de la dernière itération (s), à utiliser par filtres / PID */
-volatile float fast_loop_dt = 1.0f / 8000.0f;
+volatile float fast_loop_dt = 1.0f / (float)ICM42688_ODR_HZ;
 
 /* ── Stats en cours d'accumulation (ISR uniquement) ── */
 static uint32_t t_prev;
@@ -81,9 +86,13 @@ void FastLoop_Run(uint32_t t_entry)
     have_prev = true;
 
     /* ──────────────────────────────────────────────────────────────────
-     * ICI, plus tard : filtres gyro → PID rate → mixeur → ESC
-     * (sortie d'arrêt si !Security_IsArmed()).
+     * ICI, plus tard : filtres gyro → PID rate → mixeur
+     * (commande d'arrêt si !Security_IsArmed()).
      * ────────────────────────────────────────────────────────────────── */
+
+    /* Émet l'impulsion OneShot125 avec les dernières commandes moteur. Toujours
+     * appelée : sans elle, aucun signal ne sort (TIM8 en one-pulse). */
+    ESC_Update();
 
     /* ── Stats (à garder en dernier : mesure tout ce qui précède) ── */
     uint32_t exe = DWT->CYCCNT - t_entry;
@@ -137,7 +146,7 @@ static uint8_t put(char *out, const char *s)
     return k;
 }
 
-/* Format : "LOOP 7966 Hz | per 125.53 us (124.80-126.31) | exec moy 3.12 max 4.05 us | CPU 2.5 %" */
+/* Format : "LOOP 996 Hz | per 1004.10 us (1003.80-1004.40) | exec moy 6.50 max 7.50 us | CPU 0.6 %" */
 void FastLoop_Debug_Process(void)
 {
     if (!snap_ready) return;
@@ -151,7 +160,7 @@ void FastLoop_Debug_Process(void)
 
     char line[128];
     uint8_t p = 0;
-    p += put(&line[p], "\n\rLOOP ");        p += u32_to_dec(hz, &line[p]);
+    p += put(&line[p], "LOOP ");        p += u32_to_dec(hz, &line[p]);
     p += put(&line[p], " Hz | per ");       p += cyc_to_us(per_avg, &line[p]);
     p += put(&line[p], " us (");            p += cyc_to_us(s.per_min, &line[p]);
     line[p++] = '-';                        p += cyc_to_us(s.per_max, &line[p]);
@@ -159,6 +168,6 @@ void FastLoop_Debug_Process(void)
     p += put(&line[p], " max ");            p += cyc_to_us(s.exe_max, &line[p]);
     p += put(&line[p], " us | CPU ");       p += u32_to_dec(cpu_x10 / 10U, &line[p]);
     line[p++] = '.';                        line[p++] = (char)('0' + cpu_x10 % 10U);
-    p += put(&line[p], " %");
+    p += put(&line[p], " %\r\n");   /* fin de ligne en FIN, comme les prints IMU et RC */
     print_to_console(line, p);
 }

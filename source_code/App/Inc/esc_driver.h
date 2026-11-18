@@ -1,6 +1,7 @@
 /**
  * esc_driver.h
- * Sortie moteurs OneShot125 sur TIM8 (4 moteurs du quad). Détails : esc_driver.c.
+ * Sortie moteurs OneShot125 sur TIM8 (4 moteurs du quad), one-pulse déclenché par
+ * la fast loop. Les ESC_Set_* rangent la commande, ESC_Update l'émet. Détails : esc_driver.c.
  *
  * Échelle commune à toutes les fonctions : 0 = arrêt (125 µs) … 3000 = plein gaz (250 µs).
  */
@@ -13,13 +14,15 @@
 #include "led_driver.h"
 
 #define ESC_CMD_MAX     3000U   /* plein gaz */
-#define ESC_CCR_MIN     3000U   /* compare TIM8 pour 125 µs (24 MHz × 125 µs) */
-#define ESC_CMD_START   450U    /* 15 % : seuil de démarrage moteur mesuré au banc */
-#define ESC_CMD_SAT     2500U   /* ~83 % : au-delà, l'ESC (non calibré) ne va pas plus vite.
-                                 * Ces deux valeurs sont à remesurer après la calibration ESC (esc_calib.c). */
+#define ESC_CCR_MIN     3000U   /* 125 µs en ticks TIM8 (24 MHz × 125 µs) */
+#define ESC_OPM_ARR     6000U   /* cycle one-pulse : 6001 ticks = 250 µs (voir esc_driver.c) */
 
-/* Démarre TIM8 et sort l'impulsion d'arrêt (125 µs) sur les 4 moteurs. Sans risque. */
+/* Passe TIM8 en one-pulse, sorties armées à l'arrêt. N'émet rien. Sans risque. */
 void ESC_Init(void);
+
+/* Émet UNE impulsion avec les dernières commandes. Appelée par la fast loop à
+ * chaque itération (seul point d'émission). */
+void ESC_Update(void);
 
 /* Calibration de plage des ESC : mode radio dans esc_calib.c. */
 
@@ -33,6 +36,6 @@ void ESC_RL_MS(uint16_t x);
 
 /* Position des pads (vu de dessus, avant = caméra) : M1 = RL, M2 = FL, M3 = RR, M4 = FR. */
 void ESC_Set_Pad(uint8_t pad, uint16_t cmd);   /* pad 1..4 = M1..M4 (sérigraphie) */
-void ESC_Stop_All(void);                        /* impulsion d'arrêt sur les 4 sorties */
+void ESC_Stop_All(void);                        /* commande d'arrêt sur les 4 sorties */
 
 #endif

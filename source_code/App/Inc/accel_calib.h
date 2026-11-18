@@ -26,6 +26,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "icm42688_driver.h"   /* ICM42688_ODR_HZ : taille des fenêtres */
 
 /* ── Déclenchement radio (confirmé sur la radio de l'utilisateur) ──
  * Index 0-based dans rc_ch[] (CH5 = index 4). SA et SD sont des POUSSOIRS :
@@ -38,15 +39,15 @@
 #define ACAL_TRIG_HOLD_MS           2000U
 #define ACAL_TRIG_THROTTLE_MAX      0.05f   /* throttle en bas obligatoire */
 
-/* ── Acquisition (fenêtres alimentées à 8 kHz par l'ISR DMA de l'ICM) ──
+/* ── Acquisition (fenêtres alimentées à l'ODR par l'ISR DMA de l'ICM) ──
  * L'ISR découpe le flux en fenêtres de 100 ms. Pour chacune, la boucle reçoit la
  * moyenne accel et la variation (crête-crête) de l'accel et du gyro.
- * NB : les durées supposent un DRDY à 8 kHz. Si l'IMU tournait plus lentement,
- * tout serait simplement plus long (fenêtres de 800 échantillons quand même). */
-#define ACAL_WIN_SAMPLES            800U    /* 100 ms @ 8 kHz */
+ * La taille est dérivée de ICM42688_ODR_HZ : les durées restent en secondes
+ * quelle que soit la fréquence IMU (à l'horloge interne de l'ICM près, ±1,5 %). */
+#define ACAL_WIN_SAMPLES            (ICM42688_ODR_HZ / 10U)   /* 100 ms (100 éch. à 1 kHz) */
 #define ACAL_SETTLE_WIN             10U     /* 1 s immobile avant de mesurer : laisse amortir
                                                les vibrations après avoir posé le drone */
-#define ACAL_CAPTURE_WIN            20U     /* 2 s de moyenne par face (16 000 échantillons) :
+#define ACAL_CAPTURE_WIN            20U     /* 2 s de moyenne par face (2000 échantillons à 1 kHz) :
                                                le bruit accel moyenné devient << 0,1 mg */
 
 /* Détection d'immobilité. Le bruit au repos est bien plus faible (accel ~1-2 mg
@@ -82,10 +83,10 @@
 /* Charge la calibration depuis g_config (appeler Config_Load() avant). */
 void AccelCal_Init(void);
 
-/* ISR DMA ICM (8 kHz) : alimente l'acquisition si une calibration est en cours. */
+/* ISR DMA ICM (à l'ODR) : alimente l'acquisition si une calibration est en cours. */
 void AccelCal_Feed(const int16_t raw_a[3], const int16_t raw_g[3]);
 
-/* ISR DMA ICM (8 kHz) : raw (LSB) → m/s² calibrés (échelle nominale si pas de calibration). */
+/* ISR DMA ICM (à l'ODR) : raw (LSB) → m/s² calibrés (échelle nominale si pas de calibration). */
 void AccelCal_Apply(const int16_t raw_a[3], float out_mps2[3]);
 
 /* Boucle principale : déclenchement radio, machine d'état, LEDs, calcul, sauvegarde. */
