@@ -38,6 +38,7 @@ add_executable(logolith
     src/log.c
     src/gps.c
     src/nmea.c
+    src/icm42688.c
     ${cmsis_device_f4_SOURCE_DIR}/Source/Templates/system_stm32f4xx.c
     ${cmsis_device_f4_SOURCE_DIR}/Source/Templates/gcc/startup_stm32f405xx.s
 )

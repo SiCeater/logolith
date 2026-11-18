@@ -5,7 +5,7 @@
   "C_Cpp.intelliSenseEngine": "disabled",
   "clangd.arguments": [
     "--query-driver=**/arm-none-eabi-gcc*",
-    "--header-insertion=never",
+    "--header-insertion=iwyu",
     "--clang-tidy"
   ],
 

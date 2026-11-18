@@ -2,6 +2,7 @@
 #include "SEGGER_RTT.h"
 #include "clock.h"
 #include "gps.h"
+#include "icm42688.h"
 #include "log.h"
 #include "nmea.h"
 #include "stm32f4xx_ll_bus.h"
@@ -17,12 +18,15 @@
 #define BLINK_PERIOD_MS 420U
 #define BLINK_STACK     configMINIMAL_STACK_SIZE
 #define GPS_STACK       configMINIMAL_STACK_SIZE
+#define IMU_STACK       configMINIMAL_STACK_SIZE
 #define BLINK_PRIORITY  (tskIDLE_PRIORITY + 1)
 
 static StackType_t blink_stack[BLINK_STACK];
 static StaticTask_t blink_tcb;
 static StackType_t gps_stack[GPS_STACK];
 static StaticTask_t gps_tcb;
+static StackType_t imu_stack[IMU_STACK];
+static StaticTask_t imu_tcb;
 
 static void leds_init(void)
 {
@@ -59,6 +63,20 @@ static void blink_task(void *arg)
     for (;;) {
         LL_GPIO_TogglePin(LED_BLUE_PORT, LED_BLUE_PIN);
         xTaskDelayUntil(&wake, pdMS_TO_TICKS(BLINK_PERIOD_MS));
+    }
+}
+
+static void imu_task(void *arg)
+{
+    (void)arg;
+
+    IMU_SPI1_LL_Init();
+
+    for (;;) {
+
+        icm_whoami();
+
+        vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
 
@@ -111,6 +129,7 @@ int main(void)
 
     xTaskCreateStatic(blink_task, "blink", BLINK_STACK, NULL, BLINK_PRIORITY, blink_stack, &blink_tcb);
     xTaskCreateStatic(gps_task, "gps", GPS_STACK, NULL, BLINK_PRIORITY, gps_stack, &gps_tcb);
+    xTaskCreateStatic(imu_task, "imu", IMU_STACK, NULL, BLINK_PRIORITY, imu_stack, &imu_tcb);
     vTaskStartScheduler();
 
     for (;;) { // atteint seulement si le noyau n'a pas pu démarrer
